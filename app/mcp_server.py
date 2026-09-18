@@ -4,7 +4,6 @@ import hmac
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from mcp.server.transport_security import TransportSecuritySettings
 from mcp.types import ToolAnnotations
 
 from .config import settings
@@ -25,6 +24,8 @@ mcp = FastMCP(
         "AC writes may be locked by the server; never claim a command succeeded unless the tool result says it did."
     ),
     stateless_http=True,
+    json_response=True,
+    streamable_http_path="/",
 )
 
 _READ = ToolAnnotations(
@@ -213,12 +214,4 @@ class BearerTokenMiddleware:
         await self.app(scope, receive, send)
 
 
-mcp_http_app = BearerTokenMiddleware(
-    mcp.streamable_http_app(
-        json_response=True,
-        streamable_http_path="/",
-        transport_security=TransportSecuritySettings(
-            enable_dns_rebinding_protection=False,
-        ),
-    )
-)
+mcp_http_app = BearerTokenMiddleware(mcp.streamable_http_app())
