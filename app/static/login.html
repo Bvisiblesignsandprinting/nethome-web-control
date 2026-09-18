@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>NetHome Control Login</title>
+  <style>
+    :root{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#172026;background:#f5f7f8}
+    *{box-sizing:border-box}
+    body{margin:0;min-height:100vh;display:grid;place-items:center;background:#f5f7f8}
+    .card{width:min(420px,calc(100vw - 32px));background:#fff;border:1px solid #e2e7e9;border-radius:20px;padding:28px;box-shadow:0 12px 40px rgba(31,45,52,.08)}
+    .brand{display:flex;gap:12px;align-items:center;margin-bottom:26px}
+    .mark{width:44px;height:44px;border-radius:13px;background:#10191e;color:white;display:grid;place-items:center;font-weight:900}
+    h1{margin:0;font-size:28px;letter-spacing:-.03em}
+    p{color:#71828a;line-height:1.55;font-size:14px;margin:8px 0 22px}
+    label{display:grid;gap:8px;font-size:12px;font-weight:800;color:#5e7078}
+    input{width:100%;border:1px solid #d5dde0;border-radius:11px;padding:13px 14px;font:inherit}
+    button{width:100%;margin-top:14px;background:#172026;color:white;border:0;border-radius:11px;padding:13px 16px;font-weight:800;cursor:pointer;font-size:14px}
+    .error{margin-top:12px;padding:10px 12px;border-radius:10px;background:#fff0ee;color:#a44d47;font-size:13px;display:none}
+    .note{font-size:12px;color:#89979d;margin-top:16px}
+  </style>
+</head>
+<body>
+  <form class="card" id="login-form">
+    <div class="brand"><div class="mark">NH</div><div><strong>NetHome Control</strong><div style="color:#829198;font-size:12px">Sukkah / Play Room</div></div></div>
+    <h1>Sign in</h1>
+    <p>This dashboard is available from anywhere, but control access is protected by your private password.</p>
+    <label>Password
+      <input id="password" type="password" autocomplete="current-password" autofocus required>
+    </label>
+    <button type="submit">Open dashboard</button>
+    <div class="error" id="error"></div>
+    <div class="note">Your browser can stay signed in for up to 30 days.</div>
+  </form>
+  <script>
+    const form=document.getElementById('login-form');
+    const error=document.getElementById('error');
+    form.addEventListener('submit',async(e)=>{
+      e.preventDefault();
+      error.style.display='none';
+      const button=form.querySelector('button');
+      button.disabled=true;button.textContent='Signing in...';
+      try{
+        const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({password:document.getElementById('password').value})});
+        const d=await r.json().catch(()=>({}));
+        if(!r.ok)throw new Error(d.detail||'Login failed');
+        location.href='/';
+      }catch(err){error.textContent=err.message;error.style.display='block';}
+      finally{button.disabled=false;button.textContent='Open dashboard';}
+    });
+  </script>
+</body>
+</html>
