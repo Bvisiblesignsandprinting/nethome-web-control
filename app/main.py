@@ -20,6 +20,7 @@ from .db import (
     list_schedules,
     update_schedule,
 )
+from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate
 from .scheduler import run_due_schedules
@@ -33,11 +34,13 @@ SESSION_VALUE = "authenticated-v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    yield
+    async with nethome_mcp.session_manager.run():
+        yield
 
 
-app = FastAPI(title="NetHome Web Control", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="NetHome Web Control", version="0.3.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+app.mount("/mcp", mcp_http_app)
 
 
 def _sign_session(value: str) -> str:
