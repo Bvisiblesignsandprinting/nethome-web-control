@@ -18,6 +18,7 @@ class Settings:
     device_name: str = os.getenv("NETHOME_DEVICE_NAME", "Sukkah/Play Room AC")
     allow_writes: bool = _as_bool(os.getenv("NETHOME_ALLOW_WRITES"), False)
     api_token: str = os.getenv("NETHOME_API_TOKEN", "change-me-before-remote-access")
+    login_password: str | None = os.getenv("NETHOME_LOGIN_PASSWORD") or None
     account: str | None = os.getenv("NETHOME_ACCOUNT") or None
     password: str | None = os.getenv("NETHOME_PASSWORD") or None
 
