@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -38,6 +39,7 @@ def _ensure_schedule_columns(conn: sqlite3.Connection) -> None:
         "schedule_type": "TEXT NOT NULL DEFAULT 'weekly'",
         "start_date": "TEXT",
         "end_date": "TEXT",
+        "timezone": "TEXT NOT NULL DEFAULT 'America/New_York'",
     }
     for name, definition in additions.items():
         if name not in columns:
@@ -63,6 +65,7 @@ def init_db() -> None:
                 start_date TEXT,
                 end_date TEXT,
                 time_local TEXT NOT NULL,
+                timezone TEXT NOT NULL DEFAULT 'America/New_York',
                 action TEXT NOT NULL DEFAULT 'set',
                 mode TEXT,
                 temperature REAL,
@@ -80,6 +83,22 @@ def init_db() -> None:
                 result TEXT NOT NULL,
                 details TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS schedule_executions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                schedule_id INTEGER,
+                scheduled_for TEXT NOT NULL,
+                executed_at TEXT,
+                status TEXT NOT NULL DEFAULT 'pending',
+                command TEXT NOT NULL DEFAULT '{}',
+                result TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(schedule_id) REFERENCES schedules(id) ON DELETE SET NULL
+            );
+
+            CREATE UNIQUE INDEX IF NOT EXISTS schedule_executions_once_idx
+                ON schedule_executions(schedule_id, scheduled_for);
             """
         )
         _ensure_schedule_columns(conn)
@@ -92,6 +111,8 @@ def _normalize_row(row: dict[str, Any] | sqlite3.Row | None) -> dict[str, Any] |
     for key, value in list(data.items()):
         if hasattr(value, "isoformat"):
             data[key] = value.isoformat()
+        elif value.__class__.__name__ == "Decimal":
+            data[key] = float(value)
     return data
 
 
@@ -246,3 +267,98 @@ def list_activity(limit: int = 50) -> list[dict[str, Any]]:
             "SELECT * FROM activity ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+def claim_schedule_execution(
+    schedule_id: int,
+    scheduled_for: datetime,
+    command: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Claim one scheduled minute exactly once. Returns None if already claimed."""
+    if _use_postgres():
+        from psycopg.types.json import Jsonb
+
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.schedule_executions(
+                    schedule_id, scheduled_for, status, command
+                ) values (%s, %s, 'pending', %s)
+                on conflict (schedule_id, scheduled_for) do nothing
+                returning *
+                """,
+                (schedule_id, scheduled_for, Jsonb(command)),
+            )
+            return _normalize_row(cur.fetchone())
+
+    created_at = _now()
+    try:
+        with _sqlite_conn() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO schedule_executions(
+                    schedule_id, scheduled_for, status, command, created_at
+                ) VALUES (?, ?, 'pending', ?, ?)
+                """,
+                (
+                    schedule_id,
+                    scheduled_for.isoformat(),
+                    json.dumps(command),
+                    created_at,
+                ),
+            )
+            row = conn.execute(
+                "SELECT * FROM schedule_executions WHERE id = ?",
+                (cur.lastrowid,),
+            ).fetchone()
+        return dict(row)
+    except sqlite3.IntegrityError:
+        return None
+
+
+def finish_schedule_execution(
+    execution_id: int,
+    status: str,
+    result: dict[str, Any] | None = None,
+    error: str | None = None,
+) -> None:
+    executed_at = datetime.now(timezone.utc)
+
+    if _use_postgres():
+        from psycopg.types.json import Jsonb
+
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                update public.schedule_executions
+                set status = %s,
+                    executed_at = %s,
+                    result = %s,
+                    error = %s
+                where id = %s
+                """,
+                (
+                    status,
+                    executed_at,
+                    Jsonb(result) if result is not None else None,
+                    error,
+                    execution_id,
+                ),
+            )
+        return
+
+    with _sqlite_conn() as conn:
+        conn.execute(
+            """
+            UPDATE schedule_executions
+            SET status = ?, executed_at = ?, result = ?, error = ?
+            WHERE id = ?
+            """,
+            (
+                status,
+                executed_at.isoformat(),
+                json.dumps(result) if result is not None else None,
+                error,
+                execution_id,
+            ),
+        )
