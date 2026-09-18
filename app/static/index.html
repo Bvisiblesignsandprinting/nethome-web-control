@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>NetHome Control</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">NH</div>
+        <div><strong>NetHome Control</strong><span>Sukkah / Play Room</span></div>
+      </div>
+      <nav aria-label="Primary navigation">
+        <button class="nav active" data-view="dashboard"><span>⌂</span>Dashboard</button>
+        <button class="nav" data-view="schedules"><span>◷</span>Schedules</button>
+        <button class="nav" data-view="activity"><span>≡</span>Activity</button>
+        <button class="nav" data-view="settings"><span>⚙</span>Settings</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="service-line"><span class="mini-dot"></span>Local service running</div>
+        <span id="write-lock">Writes locked</span>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div>
+          <span class="location-label">Home climate control</span>
+          <strong>Sukkah / Play Room</strong>
+        </div>
+        <div class="top-status"><span class="mini-dot"></span>Secure local dashboard</div>
+      </header>
+
+      <section id="dashboard" class="view active">
+        <div class="page-head">
+          <div><p class="eyebrow">DASHBOARD</p><h1>Sukkah / Play Room AC</h1><p class="lede">See the connection state now. Controls unlock after live status is proven.</p></div>
+          <button id="refresh-status" class="secondary">↻ Refresh status</button>
+        </div>
+
+        <div class="grid two dashboard-grid">
+          <article class="card status-card">
+            <div class="card-kicker">DEVICE STATUS</div>
+            <div class="status-row"><span id="status-dot" class="dot neutral"></span><span id="status-text">Not checked</span></div>
+            <div id="status-detail" class="status-detail">Live status will work once the US-OSK105 is back online.</div>
+            <div class="meta-stack">
+              <div><span>Device</span><strong>Sukkah / Play Room AC</strong></div>
+              <div><span>Device ID</span><code>151732606554174</code></div>
+              <div><span>Connection</span><strong>NetHome Plus cloud</strong></div>
+            </div>
+          </article>
+
+          <article class="card controls disabled" id="control-card">
+            <div class="card-kicker">QUICK CONTROL</div>
+            <div class="temp-line"><button disabled aria-label="Lower temperature">−</button><strong>72<span>°F</span></strong><button disabled aria-label="Raise temperature">+</button></div>
+            <div class="pill-row"><span>❄ Cool</span><span>Auto fan</span></div>
+            <div class="lock-note"><strong>Controls locked</strong><br>We will unlock these after one successful live-status read.</div>
+          </article>
+        </div>
+
+        <article class="card api-card">
+          <div class="api-icon">AI</div>
+          <div><p class="eyebrow">CHATGPT READY</p><h2>One control layer for everything</h2><p>Website, schedules, SMS, and ChatGPT will all use the same validated API and activity log.</p></div>
+          <div class="api-badges"><span>Website</span><span>Schedules</span><span>ChatGPT</span><span>SMS later</span></div>
+        </article>
+      </section>
+
+      <section id="schedules" class="view">
+        <div class="page-head">
+          <div><p class="eyebrow">AUTOMATION</p><h1>Schedules</h1><p class="lede">Choose a date, weekdays, every day, or your own weekly pattern.</p></div>
+          <button id="add-schedule">+ New schedule</button>
+        </div>
+
+        <div id="schedule-list" class="schedule-list"></div>
+
+        <form id="schedule-form" class="card form hidden">
+          <div class="form-heading">
+            <div><p class="eyebrow">SCHEDULE BUILDER</p><h2 id="form-title">New schedule</h2></div>
+            <button type="button" id="close-schedule" class="icon-button secondary" aria-label="Close">×</button>
+          </div>
+
+          <label class="field full">Schedule name<input name="name" placeholder="Example: Weeknight cooling" required></label>
+
+          <div class="builder-section">
+            <div class="section-number">1</div>
+            <div class="section-body">
+              <h3>When should it run?</h3>
+              <div class="form-grid compact">
+                <label class="field">Repeat
+                  <select name="schedule_type" id="schedule-type">
+                    <option value="one_time">Specific date</option>
+                    <option value="weekdays" selected>Weekdays (Mon–Fri)</option>
+                    <option value="daily">Every day</option>
+                    <option value="weekly">Every week — choose days</option>
+                  </select>
+                </label>
+                <label class="field" id="single-date-field">Date
+                  <input type="date" name="single_date" id="single-date">
+                </label>
+                <label class="field recurring-date" id="start-date-field">Start date
+                  <input type="date" name="start_date" id="start-date">
+                </label>
+                <label class="field recurring-date" id="end-date-field">End date <span class="optional">optional</span>
+                  <input type="date" name="end_date" id="end-date">
+                </label>
+              </div>
+
+              <div id="weekday-picker" class="weekday-picker hidden" aria-label="Choose weekdays">
+                <label><input type="checkbox" value="Mon"><span>Mon</span></label>
+                <label><input type="checkbox" value="Tue"><span>Tue</span></label>
+                <label><input type="checkbox" value="Wed"><span>Wed</span></label>
+                <label><input type="checkbox" value="Thu"><span>Thu</span></label>
+                <label><input type="checkbox" value="Fri"><span>Fri</span></label>
+                <label><input type="checkbox" value="Sat"><span>Sat</span></label>
+                <label><input type="checkbox" value="Sun"><span>Sun</span></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="builder-section">
+            <div class="section-number">2</div>
+            <div class="section-body">
+              <h3>What time?</h3>
+              <div class="digital-time" aria-label="Choose time">
+                <select id="time-hour" aria-label="Hour"></select>
+                <span class="time-colon">:</span>
+                <select id="time-minute" aria-label="Minute"></select>
+                <select id="time-period" aria-label="AM or PM"><option>AM</option><option>PM</option></select>
+              </div>
+              <p class="helper">Tap each part of the clock to select the time.</p>
+            </div>
+          </div>
+
+          <div class="builder-section">
+            <div class="section-number">3</div>
+            <div class="section-body">
+              <h3>What should the AC do?</h3>
+              <div class="form-grid three">
+                <label class="field">Mode
+                  <select name="mode"><option>Cool</option><option>Heat</option><option>Auto</option><option>Fan</option><option>Dry</option></select>
+                </label>
+                <label class="field">Temperature
+                  <div class="input-suffix"><input type="number" name="temperature" min="50" max="90" value="72"><span>°F</span></div>
+                </label>
+                <label class="field">Fan
+                  <select name="fan"><option value="Auto">Auto</option><option value="Low">Low</option><option value="Medium">Medium</option><option value="High">High</option></select>
+                </label>
+              </div>
+              <label class="switch-row"><input type="checkbox" name="enabled" checked><span class="switch"></span><span><strong>Schedule enabled</strong><small>It will be active as soon as it is saved.</small></span></label>
+            </div>
+          </div>
+
+          <div id="schedule-error" class="form-error hidden" role="alert"></div>
+          <div class="form-actions"><button type="button" id="cancel-schedule" class="secondary">Cancel</button><button type="submit" id="save-schedule">Save schedule</button></div>
+        </form>
+      </section>
+
+      <section id="activity" class="view">
+        <div class="page-head"><div><p class="eyebrow">AUDIT LOG</p><h1>Activity</h1><p class="lede">Every status check, schedule change, and future ChatGPT command appears here.</p></div><button id="refresh-activity" class="secondary">↻ Refresh</button></div>
+        <div id="activity-list" class="activity-list"></div>
+      </section>
+
+      <section id="settings" class="view">
+        <div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1>Settings</h1><p class="lede">Connection and security settings for the control service.</p></div></div>
+        <div class="settings-grid">
+          <article class="card setting-card"><div class="setting-icon">☁</div><div><h2>NetHome Plus</h2><p>Your credentials are stored outside the browser in Windows Credential Manager.</p><span class="setting-state ok-text">Configured</span></div></article>
+          <article class="card setting-card"><div class="setting-icon">⌂</div><div><h2>Current host</h2><p>This version is running locally on your Windows computer while we prove AC control.</p><span class="setting-state">Local only</span></div></article>
+          <article class="card setting-card"><div class="setting-icon">AI</div><div><h2>ChatGPT access</h2><p>The API is ready for ChatGPT, but remote access stays disabled until authentication and HTTPS are finished.</p><span class="setting-state warning">Not exposed yet</span></div></article>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
