@@ -21,6 +21,7 @@ class Settings:
     automation_secret: str | None = (
         os.getenv("NETHOME_AUTOMATION_SECRET")
         or os.getenv("CRON_SECRET")
+        or os.getenv("NETHOME_API_TOKEN")
         or None
     )
     login_password: str | None = os.getenv("NETHOME_LOGIN_PASSWORD") or None
