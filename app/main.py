@@ -22,6 +22,7 @@ from .db import (
 )
 from .midea_client import midea
 from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate
+from .scheduler import run_due_schedules
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -72,6 +73,17 @@ def access_auth(
 
 class LoginRequest(BaseModel):
     password: str
+
+
+def automation_auth(authorization: str | None = Header(default=None)) -> None:
+    expected = settings.automation_secret
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="NETHOME_AUTOMATION_SECRET is not configured",
+        )
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid automation secret")
 
 
 @app.get("/login")
@@ -191,3 +203,8 @@ def schedules_delete(schedule_id: int):
 @app.get("/api/activity", dependencies=[Depends(access_auth)])
 def activity(limit: int = 50):
     return {"activity": list_activity(max(1, min(limit, 200)))}
+
+
+@app.post("/api/automation/run", dependencies=[Depends(automation_auth)])
+def automation_run():
+    return run_due_schedules()
