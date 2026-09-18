@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from .config import settings
 from .db import (
@@ -22,6 +25,9 @@ from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
+SESSION_COOKIE = "nethome_session"
+SESSION_VALUE = "authenticated-v1"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -29,20 +35,82 @@ async def lifespan(app: FastAPI):
     yield
 
 
-app = FastAPI(title="NetHome Web Control", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="NetHome Web Control", version="0.2.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
-def api_auth(authorization: str | None = Header(default=None)) -> None:
-    expected = settings.api_token
-    if not expected or expected == "change-me-before-remote-access":
+def _sign_session(value: str) -> str:
+    secret = settings.api_token
+    if not secret or secret == "change-me-before-remote-access":
+        raise RuntimeError("NETHOME_API_TOKEN must be configured in production")
+    sig = hmac.new(secret.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return f"{value}.{sig}"
+
+
+def _valid_session(cookie: str | None) -> bool:
+    if not cookie or "." not in cookie:
+        return False
+    value, sig = cookie.rsplit(".", 1)
+    if value != SESSION_VALUE:
+        return False
+    expected = hmac.new(settings.api_token.encode(), value.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(sig, expected)
+
+
+def access_auth(
+    request: Request,
+    authorization: str | None = Header(default=None),
+) -> None:
+    if _valid_session(request.cookies.get(SESSION_COOKIE)):
         return
-    if authorization != f"Bearer {expected}":
-        raise HTTPException(status_code=401, detail="Invalid API token")
+    expected = settings.api_token
+    if expected and expected != "change-me-before-remote-access":
+        if authorization == f"Bearer {expected}":
+            return
+    raise HTTPException(status_code=401, detail="Login required")
+
+
+class LoginRequest(BaseModel):
+    password: str
+
+
+@app.get("/login")
+def login_page(request: Request):
+    if _valid_session(request.cookies.get(SESSION_COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    return FileResponse(STATIC / "login.html")
+
+
+@app.post("/api/login")
+def login(body: LoginRequest):
+    if not settings.login_password:
+        raise HTTPException(status_code=503, detail="Login password is not configured")
+    if not hmac.compare_digest(body.password, settings.login_password):
+        raise HTTPException(status_code=401, detail="Incorrect password")
+    response = JSONResponse({"ok": True})
+    response.set_cookie(
+        SESSION_COOKIE,
+        _sign_session(SESSION_VALUE),
+        httponly=True,
+        secure=True,
+        samesite="lax",
+        max_age=60 * 60 * 24 * 30,
+        path="/",
+    )
+    return response
+
+
+@app.post("/api/logout")
+def logout():
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(SESSION_COOKIE, path="/")
+    return response
 
 
 @app.get("/")
-def home():
+def home(request: Request):
+    if not _valid_session(request.cookies.get(SESSION_COOKIE)):
+        return RedirectResponse("/login", status_code=303)
     return FileResponse(STATIC / "index.html")
 
 
@@ -53,11 +121,11 @@ def health():
         "device_name": settings.device_name,
         "device_id": settings.device_id,
         "writes_enabled": settings.allow_writes,
-        "api_token_configured": settings.api_token != "change-me-before-remote-access",
+        "login_configured": bool(settings.login_password),
     }
 
 
-@app.get("/api/device/devices", dependencies=[Depends(api_auth)])
+@app.get("/api/device/devices", dependencies=[Depends(access_auth)])
 def devices():
     try:
         result = midea.account_devices()
@@ -68,7 +136,7 @@ def devices():
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
-@app.get("/api/device/status", dependencies=[Depends(api_auth)])
+@app.get("/api/device/status", dependencies=[Depends(access_auth)])
 def device_status():
     try:
         result = midea.status()
@@ -79,7 +147,7 @@ def device_status():
         return {"ok": False, "offline": "offline" in str(exc).lower(), "error": str(exc)}
 
 
-@app.post("/api/device/command", dependencies=[Depends(api_auth)])
+@app.post("/api/device/command", dependencies=[Depends(access_auth)])
 def device_command(body: DeviceCommand):
     try:
         result = midea.command(body.model_dump(exclude_none=True))
@@ -91,19 +159,19 @@ def device_command(body: DeviceCommand):
         raise HTTPException(status_code=501, detail=str(exc)) from exc
 
 
-@app.get("/api/schedules", dependencies=[Depends(api_auth)])
+@app.get("/api/schedules", dependencies=[Depends(access_auth)])
 def schedules():
     return {"schedules": list_schedules()}
 
 
-@app.post("/api/schedules", dependencies=[Depends(api_auth)])
+@app.post("/api/schedules", dependencies=[Depends(access_auth)])
 def schedules_create(body: ScheduleCreate):
     row = create_schedule(body.model_dump())
     add_activity("api", "schedule_create", "success", f"schedule_id={row['id']}")
     return row
 
 
-@app.patch("/api/schedules/{schedule_id}", dependencies=[Depends(api_auth)])
+@app.patch("/api/schedules/{schedule_id}", dependencies=[Depends(access_auth)])
 def schedules_update(schedule_id: int, body: ScheduleUpdate):
     row = update_schedule(schedule_id, body.model_dump(exclude_unset=True))
     if not row:
@@ -112,7 +180,7 @@ def schedules_update(schedule_id: int, body: ScheduleUpdate):
     return row
 
 
-@app.delete("/api/schedules/{schedule_id}", dependencies=[Depends(api_auth)])
+@app.delete("/api/schedules/{schedule_id}", dependencies=[Depends(access_auth)])
 def schedules_delete(schedule_id: int):
     if not delete_schedule(schedule_id):
         raise HTTPException(status_code=404, detail="Schedule not found")
@@ -120,6 +188,6 @@ def schedules_delete(schedule_id: int):
     return {"ok": True}
 
 
-@app.get("/api/activity", dependencies=[Depends(api_auth)])
+@app.get("/api/activity", dependencies=[Depends(access_auth)])
 def activity(limit: int = 50):
     return {"activity": list_activity(max(1, min(limit, 200)))}
