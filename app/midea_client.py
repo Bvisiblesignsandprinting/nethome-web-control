@@ -26,6 +26,8 @@ class MideaClient:
             cloud=cloud,
             use_cloud=True,
             appliance_id=settings.device_id,
+            retries=2,
+            cloud_timeout=9,
         )
         state = getattr(appliance, "state", appliance)
         return {
