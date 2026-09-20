@@ -87,7 +87,9 @@ class MideaClient:
         # Apply only the requested values to the current state.
         mode = command.get("mode")
         if mode not in (None, ""):
-            appliance.state.mode = int(mode)
+            mode_map = {"auto": 1, "cool": 2, "dry": 3, "heat": 4, "fan": 5}
+            mode_value = mode_map.get(str(mode).strip().lower(), mode)
+            appliance.state.mode = int(mode_value)
 
         temperature_f = command.get("temperature")
         if temperature_f is not None:
@@ -95,7 +97,9 @@ class MideaClient:
 
         fan = command.get("fan")
         if fan not in (None, ""):
-            appliance.state.fan_speed = int(float(fan))
+            fan_map = {"auto": 102, "low": 40, "medium": 60, "high": 100}
+            fan_value = fan_map.get(str(fan).strip().lower(), fan)
+            appliance.state.fan_speed = int(float(fan_value))
 
         if action == "on":
             appliance.state.running = True
