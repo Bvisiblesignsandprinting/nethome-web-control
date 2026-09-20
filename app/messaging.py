@@ -8,7 +8,7 @@ from .weather import comfort_recommendation, forecast_summary
 
 
 HELP_TEXT = (
-    "Commands: STATUS, ON, OFF, COOL 72, HEAT 70, FAN HIGH, WEATHER TODAY, HELP."
+    "STATUS, ON, OFF, TEMP 72, COOL 72, HEAT 70, FAN HIGH, WEATHER."
 )
 
 
@@ -136,28 +136,35 @@ def process_text_command(raw: str) -> dict[str, Any]:
     elif command == "ON":
         payload = {"action": "on"}
     else:
-        match = re.fullmatch(r"(COOL|HEAT)\s+(\d{2}(?:\.\d)?)", command)
-        if match:
+        temp_only = re.fullmatch(r"(?:TEMP|SET|TEMPERATURE)?\s*(\d{2}(?:\.\d)?)", command)
+        if temp_only:
             payload = {
                 "action": "set",
-                "mode": match.group(1).lower(),
-                "temperature": float(match.group(2)),
+                "temperature": float(temp_only.group(1)),
             }
         else:
-            fan = re.fullmatch(r"FAN\s+(AUTO|LOW|MEDIUM|HIGH)", command)
-            if fan:
-                payload = {"action": "set", "fan": fan.group(1).lower()}
-            else:
-                return {
-                    "ok": False,
-                    "reply": f"Unknown command: {command}. {HELP_TEXT}",
+            match = re.fullmatch(r"(COOL|HEAT)\s+(\d{2}(?:\.\d)?)", command)
+            if match:
+                payload = {
+                    "action": "set",
+                    "mode": match.group(1).lower(),
+                    "temperature": float(match.group(2)),
                 }
+            else:
+                fan = re.fullmatch(r"FAN\s+(AUTO|LOW|MEDIUM|HIGH)", command)
+                if fan:
+                    payload = {"action": "set", "fan": fan.group(1).lower()}
+                else:
+                    return {
+                        "ok": False,
+                        "reply": f"Unknown command: {command}. {HELP_TEXT}",
+                    }
 
     try:
         queued = enqueue_device_command("sms-email", payload)
         return {
             "ok": True,
-            "reply": f"Queued: {command}.",
+            "reply": f"OK: {command} queued.",
             "result": {"execution_id": queued["id"], "queued": True},
         }
     except Exception as exc:
