@@ -65,3 +65,8 @@ class DeviceCommand(BaseModel):
     eco_mode: bool | None = None
     comfort_sleep: bool | None = None
     turbo: bool | None = None
+
+
+class SmsConfigUpdate(BaseModel):
+    allowed_from: str = Field(min_length=7, max_length=30)
+    rotate_webhook_secret: bool = False
