@@ -123,11 +123,20 @@ def message_auth(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid messaging secret")
 
 
+def _bootstrap_worker_token() -> str:
+    return hmac.new(
+        settings.api_token.encode(),
+        b"nethome-worker-v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
 def worker_auth(authorization: str | None = Header(default=None)) -> None:
-    expected = settings.worker_secret
-    if not expected:
+    candidates = {value for value in (settings.worker_secret, _bootstrap_worker_token()) if value}
+    if not candidates:
         raise HTTPException(status_code=503, detail="Worker secret is not configured")
-    if authorization != f"Bearer {expected}":
+    supplied = authorization.removeprefix("Bearer ") if authorization and authorization.startswith("Bearer ") else ""
+    if not any(hmac.compare_digest(supplied, candidate) for candidate in candidates):
         raise HTTPException(status_code=401, detail="Invalid worker secret")
 
 
@@ -216,6 +225,11 @@ def device_command(body: DeviceCommand):
     command = body.model_dump(exclude_none=True)
     queued = enqueue_device_command("web", command)
     return {"ok": True, "queued": True, "execution_id": queued["id"], "command": command}
+
+
+@app.get("/api/worker/bootstrap-token", dependencies=[Depends(access_auth)])
+def worker_bootstrap_token():
+    return {"token": _bootstrap_worker_token()}
 
 
 @app.get("/api/worker/next", dependencies=[Depends(worker_auth)])
