@@ -100,7 +100,19 @@ class MideaClient:
         # makes the remote feel much faster.
         cmd = appliance.state.apply_command()
         data = appliance._lan_packet(cmd, False)
-        cloud.appliance_transparent_send(settings.device_id, data)
+        try:
+            cloud.appliance_transparent_send(settings.device_id, data)
+        except Exception as exc:
+            message = str(exc).lower()
+            if any(token in message for token in ("3144", "3106", "loginid is empty", "invalidsession")):
+                # Midea sessions can be invalidated when several commands arrive
+                # close together. Start one completely fresh login and retry once.
+                cloud = self._cloud()
+                cloud.max_retries = 1
+                cloud.request_timeout = 6
+                cloud.appliance_transparent_send(settings.device_id, data)
+            else:
+                raise
 
         return {
             "device_id": settings.device_id,
