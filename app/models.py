@@ -78,3 +78,8 @@ class EmailBridgeConfigUpdate(BaseModel):
     from_email: str = Field(min_length=5, max_length=320)
     allowed_phone: str = Field(min_length=7, max_length=30)
     rotate_webhook_secret: bool = False
+
+
+class GoogleVoiceConfigUpdate(BaseModel):
+    allowed_phone: str = Field(min_length=7, max_length=30)
+    rotate_bridge_secret: bool = False
