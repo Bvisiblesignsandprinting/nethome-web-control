@@ -1,11 +1,12 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
-let editingId=null;let schedulesCache=[];
+let editingId=null;let schedulesCache=[];let writesEnabled=false;let liveStatusOk=false;
 
 qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();}));
 
 async function jfetch(url,options={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},credentials:'same-origin',...options});if(r.status===401){window.location.href='/login';throw new Error('Login required');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||`HTTP ${r.status}`);return data;}
-async function loadHealth(){const h=await jfetch('/api/health');qs('#write-lock').textContent=h.writes_enabled?'Writes enabled':'Writes locked';}
-async function refreshStatus(){const btn=qs('#refresh-status');btn.disabled=true;qs('#status-text').textContent='Checking…';qs('#status-dot').className='dot neutral';try{const d=await jfetch('/api/device/status');if(d.ok){qs('#status-text').textContent='Online';qs('#status-dot').className='dot ok';qs('#status-detail').textContent=d.status.raw||'Status received.';}else{qs('#status-text').textContent=d.offline?'Offline':'Unavailable';qs('#status-dot').className='dot bad';qs('#status-detail').textContent=d.error||'Unable to read status.';}}catch(e){qs('#status-text').textContent='Error';qs('#status-dot').className='dot bad';qs('#status-detail').textContent=e.message;}finally{btn.disabled=false;}}
+function updatePowerButtons(){const enabled=liveStatusOk&&writesEnabled;['#power-on','#power-off'].forEach(id=>{const el=qs(id);if(el)el.disabled=!enabled;});}
+async function loadHealth(){const h=await jfetch('/api/health');writesEnabled=Boolean(h.writes_enabled);qs('#write-lock').textContent=writesEnabled?'Writes enabled':'Writes locked';updatePowerButtons();}
+async function refreshStatus(){const btn=qs('#refresh-status');btn.disabled=true;qs('#status-text').textContent='Checking…';qs('#status-dot').className='dot neutral';try{const d=await jfetch('/api/device/status');if(d.ok){liveStatusOk=true;qs('#status-text').textContent='Online';qs('#status-dot').className='dot ok';qs('#status-detail').textContent=d.status.raw||'Status received.';updatePowerButtons();}else{liveStatusOk=false;updatePowerButtons();qs('#status-text').textContent=d.offline?'Offline':'Unavailable';qs('#status-dot').className='dot bad';qs('#status-detail').textContent=d.error||'Unable to read status.';}}catch(e){qs('#status-text').textContent='Error';qs('#status-dot').className='dot bad';qs('#status-detail').textContent=e.message;}finally{btn.disabled=false;}}
 
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function parseDateOnly(v){if(!v)return null;const [y,m,d]=v.split('-').map(Number);return new Date(Date.UTC(y,m-1,d));}
@@ -31,6 +32,9 @@ function editSchedule(s){resetForm();editingId=s.id;qs('#form-title').textConten
 function formPayload(){const f=qs('#schedule-form'),fd=new FormData(f),type=qs('#schedule-type').value;const days=type==='weekly'?selectedWeekdays():'';const payload={name:String(fd.get('name')||'').trim(),schedule_type:type,days,time_local:getTimePicker(),mode:fd.get('mode'),temperature:Number(fd.get('temperature')),fan:fd.get('fan'),enabled:f.elements.enabled.checked};if(type==='one_time'){payload.start_date=qs('#single-date').value||null;payload.end_date=payload.start_date;}else{payload.start_date=qs('#start-date').value||null;payload.end_date=qs('#end-date').value||null;}return payload;}
 function validatePayload(p){if(!p.name)return'Please enter a schedule name.';if(p.schedule_type==='one_time'&&!p.start_date)return'Please select the date.';if(p.schedule_type==='weekly'&&!p.days)return'Please choose at least one weekday.';if(p.start_date&&p.end_date&&p.end_date<p.start_date)return'End date cannot be before start date.';return'';}
 
+async function sendPower(action){const on=qs('#power-on'),off=qs('#power-off');on.disabled=true;off.disabled=true;try{await jfetch('/api/device/command',{method:'POST',body:JSON.stringify({action})});await refreshStatus();}catch(e){alert(e.message);}finally{updatePowerButtons();}}
+qs('#power-on').addEventListener('click',()=>sendPower('on'));
+qs('#power-off').addEventListener('click',()=>sendPower('off'));
 qs('#refresh-status').addEventListener('click',refreshStatus);qs('#refresh-activity').addEventListener('click',loadActivity);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
