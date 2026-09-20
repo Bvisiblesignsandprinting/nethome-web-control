@@ -60,3 +60,8 @@ class DeviceCommand(BaseModel):
     mode: str | None = None
     fan: str | None = None
     running: bool | None = None
+    horizontal_swing: bool | None = None
+    vertical_swing: bool | None = None
+    eco_mode: bool | None = None
+    comfort_sleep: bool | None = None
+    turbo: bool | None = None
