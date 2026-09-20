@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -235,41 +235,57 @@ def email_text_message(body: EmailTextRequest):
     return process_text_command(body.text)
 
 
-@app.get("/privacy")
+@app.get("/privacy", response_class=HTMLResponse)
 def privacy_policy():
-    return {
-        "title": "Privacy Policy",
-        "brand": "NetHome AC Control",
-        "data_collected": "Phone number, SMS message content, HVAC commands, system status, and weather-related requests used to operate the service.",
-        "use": "Data is used only to provide the NetHome AC Control SMS and HVAC automation service.",
-        "sharing": "We do not sell or share your SMS opt-in data or personal information with third parties for marketing purposes.",
-        "retention": "Operational logs may be retained for troubleshooting and service reliability.",
-        "contact": "nethomeaccontrol@gmail.com",
-    }
+    return """<!doctype html>
+<html><head><title>Privacy Policy</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}</style></head>
+<body>
+<h1>Privacy Policy</h1>
+<p><strong>NetHome AC Control</strong> is a private, low-volume SMS and HVAC automation service.</p>
+<h2>Information we collect</h2>
+<p>We may collect the user's phone number, SMS message content, HVAC commands, system status, and weather-related requests needed to operate the service.</p>
+<h2>How we use information</h2>
+<p>Information is used only to provide, maintain, troubleshoot, and improve the NetHome AC Control service.</p>
+<h2>SMS data sharing</h2>
+<p>We do not sell or share your SMS opt-in data or personal information with third parties for marketing purposes.</p>
+<h2>Retention</h2>
+<p>Operational logs may be retained for troubleshooting and service reliability.</p>
+<h2>Contact</h2>
+<p>Email: nethomeaccontrol@gmail.com</p>
+</body></html>"""
 
 
-@app.get("/terms")
+@app.get("/terms", response_class=HTMLResponse)
 def terms_of_service():
-    return {
-        "title": "Terms & Conditions",
-        "brand": "NetHome AC Control",
-        "program": "Private low-volume SMS service for HVAC status, weather-based recommendations, and HVAC command confirmations.",
-        "rates": "Message and data rates may apply.",
-        "frequency": "Message frequency varies based on user requests and automated replies.",
-        "help": "Reply HELP for help.",
-        "stop": "Reply STOP to opt out.",
-        "support": "nethomeaccontrol@gmail.com",
-        "carrier_notice": "Carriers are not liable for delayed or undelivered messages.",
-        "privacy": "See /privacy for the Privacy Policy.",
-    }
+    return """<!doctype html>
+<html><head><title>Terms & Conditions</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}</style></head>
+<body>
+<h1>Terms & Conditions</h1>
+<p><strong>NetHome AC Control</strong> is a private, low-volume SMS service for HVAC status, weather-based recommendations, and HVAC command confirmations.</p>
+<h2>SMS Terms</h2>
+<p>Message and data rates may apply. Message frequency varies based on user requests and automated replies.</p>
+<p><strong>HELP:</strong> Reply HELP for help.</p>
+<p><strong>STOP:</strong> Reply STOP to opt out.</p>
+<p>Carriers are not liable for delayed or undelivered messages.</p>
+<p>Support: nethomeaccontrol@gmail.com</p>
+<p>Privacy Policy: <a href="/privacy">https://nethome-web-control-six.vercel.app/privacy</a></p>
+</body></html>"""
 
 
-@app.get("/sms-opt-in")
+@app.get("/sms-opt-in", response_class=HTMLResponse)
 def sms_opt_in_proof():
-    return {
-        "title": "NetHome AC Control SMS Opt-In",
-        "instructions": "To enroll, text START to the NetHome AC Control SMS number assigned to this service.",
-        "welcome_message": "Welcome to NetHome AC Control. This private service sends HVAC status, weather-based recommendations, and command confirmations. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
-        "confirmation": "After the welcome message, reply Y to confirm enrollment.",
-        "enrollment_confirmation": "NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
-    }
+    return """<!doctype html>
+<html><head><title>NetHome AC Control SMS Opt-In</title><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}.box{background:#f5f5f5;padding:16px;border-radius:8px}</style></head>
+<body>
+<h1>NetHome AC Control SMS Opt-In</h1>
+<p>To enroll in this private HVAC messaging service, text <strong>START</strong> to <strong>+1 (502) 747-4864</strong>.</p>
+<h2>What happens next</h2>
+<div class="box"><strong>Welcome message:</strong><br>
+Welcome to NetHome AC Control. This private service sends HVAC status, weather-based recommendations, and command confirmations. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.</div>
+<p>After receiving the welcome message, reply <strong>YES</strong> to confirm enrollment.</p>
+<div class="box"><strong>Enrollment confirmation:</strong><br>
+NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.</div>
+</body></html>"""
