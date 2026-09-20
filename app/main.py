@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import secrets
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
@@ -25,13 +26,15 @@ from .db import (
     init_db,
     list_activity,
     list_schedules,
+    load_sms_config,
     save_device_state,
+    save_sms_config,
     update_schedule,
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .messaging import process_text_command
-from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate
+from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
 
 BASE = Path(__file__).resolve().parent
@@ -148,8 +151,9 @@ def _valid_twilio_signature(
     params: dict[str, str],
     signature: str | None,
     fallback_token: str | None,
+    fallback_secret: str | None,
 ) -> bool:
-    """Validate Twilio, or a secret URL token until Twilio auth is configured."""
+    """Validate Twilio signature, or a dedicated secret webhook URL."""
     token = settings.twilio_auth_token
     if token:
         if not signature:
@@ -159,12 +163,30 @@ def _valid_twilio_signature(
         expected = base64.b64encode(digest).decode()
         return hmac.compare_digest(signature, expected)
 
-    expected = settings.message_secret
     return bool(
-        expected
+        fallback_secret
         and fallback_token
-        and hmac.compare_digest(fallback_token, expected)
+        and hmac.compare_digest(fallback_token, fallback_secret)
     )
+
+
+def _normalize_phone(value: str | None) -> str:
+    digits = "".join(ch for ch in (value or "") if ch.isdigit())
+    if len(digits) == 10:
+        return "+1" + digits
+    if len(digits) == 11 and digits.startswith("1"):
+        return "+" + digits
+    return "+" + digits if digits else ""
+
+
+def _sms_config_with_secret() -> dict:
+    config = load_sms_config()
+    secret = str(config.get("webhook_secret") or "")
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+        config["webhook_secret"] = secret
+        save_sms_config(config)
+    return config
 
 
 @app.get("/login")
@@ -219,6 +241,7 @@ def health():
         "computer_required": False,
         "twilio_signature_configured": bool(settings.twilio_auth_token),
         "sms_webhook": "/api/message/twilio",
+        "direct_sms_configured": bool(load_sms_config().get("allowed_from")),
     }
 
 
@@ -342,7 +365,41 @@ def automation_run():
 
 @app.post("/api/message/email", dependencies=[Depends(message_auth)])
 def email_text_message(body: EmailTextRequest):
+    # Legacy bridge kept temporarily for compatibility; direct Twilio SMS is preferred.
     return process_text_command(body.text)
+
+
+@app.get("/api/sms/config", dependencies=[Depends(access_auth)])
+def sms_config(request: Request):
+    config = _sms_config_with_secret()
+    base = str(request.base_url).rstrip("/")
+    return {
+        "ok": True,
+        "allowed_from": config.get("allowed_from") or "",
+        "webhook_url": f"{base}/api/message/twilio?token={config['webhook_secret']}",
+        "direct_sms_ready": bool(config.get("allowed_from")),
+        "twilio_signature_configured": bool(settings.twilio_auth_token),
+    }
+
+
+@app.post("/api/sms/config", dependencies=[Depends(access_auth)])
+def sms_config_update(body: SmsConfigUpdate, request: Request):
+    config = _sms_config_with_secret()
+    allowed_from = _normalize_phone(body.allowed_from)
+    if len(allowed_from) < 11:
+        raise HTTPException(status_code=400, detail="Enter a valid mobile number.")
+    config["allowed_from"] = allowed_from
+    if body.rotate_webhook_secret:
+        config["webhook_secret"] = secrets.token_urlsafe(32)
+    save_sms_config(config)
+    base = str(request.base_url).rstrip("/")
+    add_activity("sms-config", "updated", "success", "Direct Twilio SMS configured.")
+    return {
+        "ok": True,
+        "allowed_from": allowed_from,
+        "webhook_url": f"{base}/api/message/twilio?token={config['webhook_secret']}",
+        "direct_sms_ready": True,
+    }
 
 
 @app.post("/api/message/twilio")
@@ -351,13 +408,32 @@ async def twilio_text_message(request: Request):
     parsed = parse_qs(raw, keep_blank_values=True)
     params = {key: values[0] if values else "" for key, values in parsed.items()}
 
+    config = load_sms_config()
     signature = request.headers.get("X-Twilio-Signature")
     fallback_token = request.query_params.get("token")
-    if not _valid_twilio_signature(str(request.url), params, signature, fallback_token):
+    fallback_secret = str(config.get("webhook_secret") or "")
+    if not _valid_twilio_signature(
+        str(request.url),
+        params,
+        signature,
+        fallback_token,
+        fallback_secret,
+    ):
         raise HTTPException(status_code=403, detail="Invalid Twilio webhook authentication")
 
     body = params.get("Body", "")
-    sender = params.get("From", "")
+    sender = _normalize_phone(params.get("From", ""))
+    allowed_from = _normalize_phone(str(config.get("allowed_from") or ""))
+    if not allowed_from or not hmac.compare_digest(sender, allowed_from):
+        add_activity(
+            "twilio",
+            "sms",
+            "rejected",
+            f"from={sender[-4:] if sender else 'unknown'}",
+        )
+        twiml = '<?xml version="1.0" encoding="UTF-8"?><Response><Message>Not authorized for this private AC control number.</Message></Response>'
+        return Response(content=twiml, media_type="application/xml")
+
     result = process_text_command(body)
     reply = escape(str(result.get("reply") or "Command received."))
 
