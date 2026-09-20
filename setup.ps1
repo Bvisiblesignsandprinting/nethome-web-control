@@ -1,13 +1,20 @@
 $ErrorActionPreference = "Stop"
 Set-Location $PSScriptRoot
 
-if (-not (Test-Path ".venv")) { py -m venv .venv }
+if (-not (Test-Path ".venv")) {
+    py -m venv .venv
+}
 
 $python = ".\.venv\Scripts\python.exe"
 
-function Invoke-Pip {
-    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$PipArgs)
+function Run-Pip {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$PipArgs
+    )
+
     & $python -m pip @PipArgs
+
     if ($LASTEXITCODE -ne 0) {
         throw "pip failed with exit code $LASTEXITCODE"
     }
@@ -19,22 +26,24 @@ function Test-Msmart {
 }
 
 try {
-    Invoke-Pip "install", "--upgrade", "pip")
+    Run-Pip -PipArgs @("install", "--upgrade", "pip")
 }
 catch {
-    Write-Host "Skipping pip upgrade because this Python 3.14 install rejects the PyPI certificate chain."
+    Write-Host ""
+    Write-Host "Normal pip upgrade failed on this Windows/Python setup."
+    Write-Host "Continuing with the installed pip version."
 }
 
 try {
-    Invoke-Pip "install", "-r", "requirements.txt")
+    Run-Pip -PipArgs @("install", "-r", "requirements.txt")
 }
 catch {
     Write-Host ""
-    Write-Host "Normal pip TLS verification failed on this Windows/Python setup."
+    Write-Host "Normal pip TLS verification failed."
     Write-Host "Retrying against the official PyPI hosts with trusted-host for this install only."
     Write-Host ""
 
-    Invoke-Pip 
+    Run-Pip -PipArgs @(
         "install",
         "--trusted-host", "pypi.org",
         "--trusted-host", "files.pythonhosted.org",
@@ -42,12 +51,10 @@ catch {
     )
 }
 
-# Python 3.14 on this machine can report a certificate error without leaving
-# msmart-ng installed. Verify the import and repair it explicitly if needed.
 if (-not (Test-Msmart)) {
     Write-Host ""
     Write-Host "msmart-ng is still missing. Installing it explicitly from official PyPI..."
-    Invoke-Pip 
+    Run-Pip -PipArgs @(
         "install",
         "--trusted-host", "pypi.org",
         "--trusted-host", "files.pythonhosted.org",
