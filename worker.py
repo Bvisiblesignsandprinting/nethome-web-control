@@ -37,6 +37,7 @@ def _midea_compatible_request(self, method, url, **kwargs):
 requests.sessions.Session.request = _midea_compatible_request
 requests.packages.urllib3.disable_warnings()
 
+from app.local_midea import local_midea
 from app.midea_client import midea
 
 BASE_URL = os.getenv("NETHOME_REMOTE_URL", "https://nethome-web-control-six.vercel.app").rstrip("/")
@@ -88,9 +89,36 @@ def _normalize_command(value):
     return dict(value or {})
 
 
+def _controller_status():
+    try:
+        state = local_midea.status()
+        print("Local LAN control active.")
+        return state
+    except Exception as local_exc:
+        print(f"Local LAN status unavailable: {local_exc}")
+        print("Falling back to Midea cloud for status only.")
+        return midea.status()
+
+
+def _controller_command(command: dict):
+    action = str(command.get("action") or "").lower()
+    try:
+        result = local_midea.command(command)
+        print("Command verified locally by AC.")
+        return result
+    except Exception as local_exc:
+        # Do not pretend mode/temperature worked through the old cloud path.
+        # Only ON/OFF may use the proven cloud fallback.
+        if action in {"on", "off"}:
+            print(f"Local LAN command unavailable: {local_exc}")
+            print("Using cloud fallback for power command.")
+            return midea.command(command)
+        raise RuntimeError(f"Local LAN control required for mode/temperature: {local_exc}") from local_exc
+
+
 def _send_state() -> None:
     try:
-        state = midea.status()
+        state = _controller_status()
         _request("/api/worker/state", "POST", {"online": True, "state": state})
         print(f"[{datetime.now().isoformat(timespec='seconds')}] status online")
     except Exception as exc:
@@ -121,7 +149,7 @@ def _run_job(job: dict) -> None:
 
     print(f"job #{execution_id}: {command}")
     try:
-        result = midea.command(command)
+        result = _controller_command(command)
         _request(
             f"/api/worker/{execution_id}/complete",
             "POST",
