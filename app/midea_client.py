@@ -45,6 +45,7 @@ class MideaClient:
             "horizontal_swing": getattr(state, "horizontal_swing", None),
             "eco_mode": getattr(state, "eco_mode", None),
             "comfort_sleep": getattr(state, "comfort_sleep", None),
+            "turbo": getattr(state, "turbo", None),
         }
 
     def command(self, command: dict[str, Any]) -> dict[str, Any]:
@@ -86,7 +87,18 @@ class MideaClient:
         else:
             appliance.state.running = bool(command.get("running", True))
 
-        appliance.apply(cloud=cloud)
+        for field in ("horizontal_swing", "vertical_swing", "eco_mode", "comfort_sleep", "turbo"):
+            value = command.get(field)
+            if value is not None:
+                setattr(appliance.state, field, bool(value))
+
+        # Send the SET packet directly. LanDevice.apply() performs a second
+        # status refresh after every write; skipping that extra round-trip
+        # makes the remote feel much faster.
+        cmd = appliance.state.apply_command()
+        data = appliance._lan_packet(cmd, False)
+        cloud.appliance_transparent_send(settings.device_id, data)
+
         return {
             "device_id": settings.device_id,
             "device_name": settings.device_name,
@@ -95,6 +107,11 @@ class MideaClient:
             "mode": appliance.state.mode,
             "target_temperature_c": appliance.state.target_temperature,
             "fan_speed": appliance.state.fan_speed,
+            "horizontal_swing": appliance.state.horizontal_swing,
+            "vertical_swing": appliance.state.vertical_swing,
+            "eco_mode": appliance.state.eco_mode,
+            "comfort_sleep": appliance.state.comfort_sleep,
+            "turbo": appliance.state.turbo,
         }
 
 
