@@ -8,7 +8,23 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timezone
 
+import requests
+from requests.adapters import HTTPAdapter
+
 os.environ.setdefault("NETHOME_ALLOW_WRITES", "true")
+
+_SSL_CONTEXT = ssl.create_default_context()
+if hasattr(ssl, "VERIFY_X509_STRICT"):
+    _SSL_CONTEXT.verify_flags &= ~ssl.VERIFY_X509_STRICT
+
+class _TLSAdapter(HTTPAdapter):
+    def init_poolmanager(self, connections, maxsize, block=False, **pool_kwargs):
+        pool_kwargs["ssl_context"] = _SSL_CONTEXT
+        return super().init_poolmanager(connections, maxsize, block=block, **pool_kwargs)
+
+_MIDEA_SESSION = requests.Session()
+_MIDEA_SESSION.mount("https://", _TLSAdapter())
+requests.post = _MIDEA_SESSION.post
 
 from app.midea_client import midea
 
