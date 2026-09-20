@@ -3,11 +3,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import json
 import secrets
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs
+from urllib.request import Request as UrlRequest, urlopen
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -26,15 +28,17 @@ from .db import (
     init_db,
     list_activity,
     list_schedules,
+    load_email_bridge_config,
     load_sms_config,
     save_device_state,
+    save_email_bridge_config,
     save_sms_config,
     update_schedule,
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .messaging import process_text_command
-from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
+from .models import DeviceCommand, EmailBridgeConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
 
 BASE = Path(__file__).resolve().parent
@@ -189,6 +193,68 @@ def _sms_config_with_secret() -> dict:
     return config
 
 
+def _email_bridge_config_with_secret() -> dict:
+    config = load_email_bridge_config()
+    secret = str(config.get("webhook_secret") or "")
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+        config["webhook_secret"] = secret
+        save_email_bridge_config(config)
+    return config
+
+
+def _extract_phone_digits_from_gateway(address: str) -> str:
+    local = (address or "").split("@", 1)[0]
+    return "".join(ch for ch in local if ch.isdigit())
+
+
+def _postmark_inbound_text(payload: dict) -> str:
+    for key in ("StrippedTextReply", "TextBody"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+
+    for item in payload.get("Attachments") or []:
+        if not isinstance(item, dict):
+            continue
+        ctype = str(item.get("ContentType") or "").lower()
+        name = str(item.get("Name") or "").lower()
+        if ctype.startswith("text/plain") or name.endswith(".txt"):
+            raw = item.get("Content")
+            if not raw:
+                continue
+            try:
+                return base64.b64decode(raw).decode("utf-8", errors="replace").strip()
+            except Exception:
+                continue
+    return ""
+
+
+def _send_postmark_reply(token: str, from_email: str, to_email: str, text_body: str) -> None:
+    payload = json.dumps(
+        {
+            "From": from_email,
+            "To": to_email,
+            "Subject": "NetHome AC",
+            "TextBody": text_body,
+            "MessageStream": "outbound",
+        }
+    ).encode()
+    req = UrlRequest(
+        "https://api.postmarkapp.com/email",
+        data=payload,
+        method="POST",
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "X-Postmark-Server-Token": token,
+        },
+    )
+    with urlopen(req, timeout=15) as response:
+        if response.status < 200 or response.status >= 300:
+            raise RuntimeError(f"Postmark reply failed with HTTP {response.status}")
+
+
 @app.get("/login")
 def login_page(request: Request):
     if _valid_session(request.cookies.get(SESSION_COOKIE)):
@@ -242,6 +308,10 @@ def health():
         "twilio_signature_configured": bool(settings.twilio_auth_token),
         "sms_webhook": "/api/message/twilio",
         "direct_sms_configured": bool(load_sms_config().get("allowed_from")),
+        "email_bridge_configured": bool(
+            load_email_bridge_config().get("postmark_server_token")
+            and load_email_bridge_config().get("inbound_address")
+        ),
     }
 
 
@@ -400,6 +470,112 @@ def sms_config_update(body: SmsConfigUpdate, request: Request):
         "webhook_url": f"{base}/api/message/twilio?token={config['webhook_secret']}",
         "direct_sms_ready": True,
     }
+
+
+@app.get("/api/email-bridge/config", dependencies=[Depends(access_auth)])
+def email_bridge_config(request: Request):
+    config = _email_bridge_config_with_secret()
+    base = str(request.base_url).rstrip("/")
+    return {
+        "ok": True,
+        "inbound_address": config.get("inbound_address") or "",
+        "from_email": config.get("from_email") or "",
+        "allowed_phone": config.get("allowed_phone") or "",
+        "webhook_url": f"{base}/api/message/postmark?token={config['webhook_secret']}",
+        "token_configured": bool(config.get("postmark_server_token")),
+        "ready": bool(
+            config.get("inbound_address")
+            and config.get("postmark_server_token")
+            and config.get("from_email")
+            and config.get("allowed_phone")
+        ),
+    }
+
+
+@app.post("/api/email-bridge/config", dependencies=[Depends(access_auth)])
+def email_bridge_config_update(body: EmailBridgeConfigUpdate, request: Request):
+    config = _email_bridge_config_with_secret()
+    allowed_phone = _normalize_phone(body.allowed_phone)
+    if len(allowed_phone) < 11:
+        raise HTTPException(status_code=400, detail="Enter a valid mobile number.")
+
+    inbound_address = body.inbound_address.strip()
+    from_email = body.from_email.strip()
+    if "@" not in inbound_address or "@" not in from_email:
+        raise HTTPException(status_code=400, detail="Enter valid email addresses.")
+
+    config.update(
+        {
+            "inbound_address": inbound_address,
+            "postmark_server_token": body.postmark_server_token.strip(),
+            "from_email": from_email,
+            "allowed_phone": allowed_phone,
+        }
+    )
+    if body.rotate_webhook_secret:
+        config["webhook_secret"] = secrets.token_urlsafe(32)
+    save_email_bridge_config(config)
+
+    base = str(request.base_url).rstrip("/")
+    add_activity("email-bridge-config", "updated", "success", "Temporary email bridge configured.")
+    return {
+        "ok": True,
+        "inbound_address": inbound_address,
+        "from_email": from_email,
+        "allowed_phone": allowed_phone,
+        "webhook_url": f"{base}/api/message/postmark?token={config['webhook_secret']}",
+        "ready": True,
+    }
+
+
+@app.post("/api/message/postmark")
+async def postmark_inbound_message(request: Request):
+    config = load_email_bridge_config()
+    expected = str(config.get("webhook_secret") or "")
+    supplied = request.query_params.get("token") or ""
+    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Invalid email bridge webhook token")
+
+    payload = await request.json()
+    sender = str(payload.get("From") or payload.get("FromFull", {}).get("Email") or "").strip()
+    sender_lower = sender.lower()
+    gateway_domains = ("@vtext.com", "@vzwpix.com", "@mypixmessages.com")
+    if not sender_lower.endswith(gateway_domains):
+        add_activity("email-bridge", "inbound", "rejected", f"sender={sender_lower[-80:]}")
+        return {"ok": True, "ignored": True, "reason": "unsupported_sender"}
+
+    allowed_phone = _normalize_phone(str(config.get("allowed_phone") or ""))
+    sender_digits = _extract_phone_digits_from_gateway(sender)
+    allowed_digits = "".join(ch for ch in allowed_phone if ch.isdigit())
+    if allowed_digits and sender_digits and not sender_digits.endswith(allowed_digits[-10:]):
+        add_activity("email-bridge", "inbound", "rejected", f"sender={sender_digits[-4:]}")
+        return {"ok": True, "ignored": True, "reason": "unauthorized_phone"}
+
+    text_body = _postmark_inbound_text(payload)
+    if not text_body:
+        add_activity("email-bridge", "inbound", "ignored", "No text content found.")
+        return {"ok": True, "ignored": True, "reason": "no_text"}
+
+    result = process_text_command(text_body)
+    reply = str(result.get("reply") or "Command received.")
+
+    token = str(config.get("postmark_server_token") or "")
+    from_email = str(config.get("from_email") or "")
+    if token and from_email and sender:
+        try:
+            _send_postmark_reply(token, from_email, sender, reply)
+            add_activity(
+                "email-bridge",
+                "reply",
+                "success",
+                f"to={sender_digits[-4:] if sender_digits else 'gateway'} command={text_body[:80]}",
+            )
+        except Exception as exc:
+            add_activity("email-bridge", "reply", "error", str(exc)[:500])
+    else:
+        add_activity("email-bridge", "reply", "error", "Postmark outbound settings incomplete.")
+
+    return {"ok": True, "processed": True}
 
 
 @app.post("/api/message/twilio")
