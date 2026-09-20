@@ -35,37 +35,52 @@
       </header>
 
       <section id="dashboard" class="view active">
-        <div class="page-head">
-          <div><p class="eyebrow">DASHBOARD</p><h1>Sukkah / Play Room AC</h1><p class="lede">See the connection state now. Controls unlock after live status is proven.</p></div>
-          <button id="refresh-status" class="secondary">↻ Refresh status</button>
-        </div>
-
-        <div class="grid two dashboard-grid">
-          <article class="card status-card">
-            <div class="card-kicker">DEVICE STATUS</div>
-            <div class="status-row"><span id="status-dot" class="dot neutral"></span><span id="status-text">Not checked</span></div>
-            <div id="status-detail" class="status-detail">Live status will work once the US-OSK105 is back online.</div>
-            <div class="meta-stack">
-              <div><span>Device</span><strong>Sukkah / Play Room AC</strong></div>
-              <div><span>Device ID</span><code>151732606554174</code></div>
-              <div><span>Connection</span><strong>NetHome Plus cloud</strong></div>
+        <div class="simple-ac">
+          <div class="simple-ac-top">
+            <div>
+              <p class="eyebrow">HOME CLIMATE CONTROL</p>
+              <h1>Sukkah / Play Room AC</h1>
+              <div class="simple-weather"><span id="outdoor-temp">Outdoor --°F</span><span>/</span><span id="indoor-temp">Indoor --°F</span></div>
             </div>
-          </article>
+            <div class="simple-online"><span id="status-dot" class="dot neutral"></span><span id="status-text">Not checked</span></div>
+          </div>
 
-          <article class="card controls disabled" id="control-card">
-            <div class="card-kicker">QUICK CONTROL</div>
-            <div class="pill-row" style="margin-bottom:14px"><button id="power-on" class="secondary" disabled>Power On</button><button id="power-off" class="secondary" disabled>Power Off</button></div>
-            <div class="temp-line"><button disabled aria-label="Lower temperature">−</button><strong>72<span>°F</span></strong><button disabled aria-label="Raise temperature">+</button></div>
-            <div class="pill-row"><span>❄ Cool</span><span>Auto fan</span></div>
-            <div class="lock-note"><strong>Controls locked</strong><br>Power On / Off will unlock after one successful live-status read and writes are enabled.</div>
-          </article>
+          <div class="mode-tabs" aria-label="AC mode">
+            <span data-mode="1">❄ Cool</span>
+            <span data-mode="2">◌ Dry</span>
+            <span data-mode="4">⌁ Fan</span>
+            <span data-mode="3">◉ Auto</span>
+            <span data-mode="5">☀ Heat</span>
+          </div>
+
+          <div class="ac-hero">
+            <button id="temp-down" class="round-control" disabled aria-label="Lower temperature">−</button>
+            <div class="ac-dial">
+              <div id="fan-label" class="fan-label">Fan --</div>
+              <div class="temperature"><span id="target-temp">--</span><small>°F</small></div>
+              <div id="power-state" class="power-state">Status not checked</div>
+              <button id="power-toggle" class="power-button" disabled aria-label="Power">⏻</button>
+            </div>
+            <button id="temp-up" class="round-control" disabled aria-label="Raise temperature">+</button>
+          </div>
+
+          <div class="simple-actions">
+            <button id="refresh-status" class="soft-action">↻ Refresh</button>
+            <button id="power-on" class="soft-action" disabled>Power On</button>
+            <button id="power-off" class="soft-action" disabled>Power Off</button>
+          </div>
+
+          <div id="status-detail" class="simple-message">Checking the live AC status will enable available controls.</div>
+
+          <div class="feature-row">
+            <div><span>🌀</span><small>Fan Speed</small></div>
+            <div><span>↔</span><small>Left / Right</small></div>
+            <div><span>↕</span><small>Up / Down</small></div>
+            <div><span>♻</span><small>Eco</small></div>
+            <div><span>⚡</span><small>Boost</small></div>
+            <div><span>☾</span><small>Sleep</small></div>
+          </div>
         </div>
-
-        <article class="card api-card">
-          <div class="api-icon">AI</div>
-          <div><p class="eyebrow">CHATGPT READY</p><h2>One control layer for everything</h2><p>Website, schedules, SMS, and ChatGPT will all use the same validated API and activity log.</p></div>
-          <div class="api-badges"><span>Website</span><span>Schedules</span><span>ChatGPT</span><span>SMS later</span></div>
-        </article>
       </section>
 
       <section id="schedules" class="view">
