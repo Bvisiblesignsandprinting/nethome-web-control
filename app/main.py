@@ -95,6 +95,17 @@ def automation_auth(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid automation secret")
 
 
+def message_auth(authorization: str | None = Header(default=None)) -> None:
+    expected = settings.message_secret
+    if not expected:
+        raise HTTPException(
+            status_code=503,
+            detail="NETHOME_MESSAGE_SECRET is not configured",
+        )
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid messaging secret")
+
+
 @app.get("/login")
 def login_page(request: Request):
     if _valid_session(request.cookies.get(SESSION_COOKIE)):
@@ -219,6 +230,6 @@ def automation_run():
     return run_due_schedules()
 
 
-@app.post("/api/message/email", dependencies=[Depends(access_auth)])
+@app.post("/api/message/email", dependencies=[Depends(message_auth)])
 def email_text_message(body: EmailTextRequest):
     return process_text_command(body.text)
