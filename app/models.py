@@ -70,3 +70,11 @@ class DeviceCommand(BaseModel):
 class SmsConfigUpdate(BaseModel):
     allowed_from: str = Field(min_length=7, max_length=30)
     rotate_webhook_secret: bool = False
+
+
+class EmailBridgeConfigUpdate(BaseModel):
+    inbound_address: str = Field(min_length=5, max_length=320)
+    postmark_server_token: str = Field(min_length=3, max_length=300)
+    from_email: str = Field(min_length=5, max_length=320)
+    allowed_phone: str = Field(min_length=7, max_length=30)
+    rotate_webhook_secret: bool = False
