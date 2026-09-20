@@ -242,7 +242,7 @@ def privacy_policy():
 <style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}</style></head>
 <body>
 <h1>Privacy Policy</h1>
-<p><strong>NetHome AC Control</strong> is a private, low-volume SMS and HVAC automation service.</p>
+<p><strong>GERSHON FELBERBAUM</strong> operates <strong>NetHome AC Control</strong>, a private, low-volume SMS and HVAC automation service.</p>
 <h2>Information we collect</h2>
 <p>We may collect the user's phone number, SMS message content, HVAC commands, system status, and weather-related requests needed to operate the service.</p>
 <h2>How we use information</h2>
@@ -263,7 +263,7 @@ def terms_of_service():
 <style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}</style></head>
 <body>
 <h1>Terms & Conditions</h1>
-<p><strong>NetHome AC Control</strong> is a private, low-volume SMS service for HVAC status, weather-based recommendations, and HVAC command confirmations.</p>
+<p><strong>GERSHON FELBERBAUM</strong> operates <strong>NetHome AC Control</strong>, a private, low-volume SMS service for HVAC status, weather-based recommendations, and HVAC command confirmations.</p>
 <h2>SMS Terms</h2>
 <p>Message and data rates may apply. Message frequency varies based on user requests and automated replies.</p>
 <p><strong>HELP:</strong> Reply HELP for help.</p>
@@ -280,7 +280,7 @@ def sms_opt_in_proof():
 <html><head><title>NetHome AC Control SMS Opt-In</title><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>body{font-family:Arial,sans-serif;max-width:760px;margin:40px auto;padding:0 20px;line-height:1.55;color:#222}h1,h2{color:#111}.box{background:#f5f5f5;padding:16px;border-radius:8px}</style></head>
 <body>
-<h1>NetHome AC Control SMS Opt-In</h1>
+<h1>NetHome AC Control SMS Opt-In</h1><p><strong>GERSHON FELBERBAUM</strong> operates NetHome AC Control.</p>
 <p>To enroll in this private HVAC messaging service, text <strong>START</strong> to <strong>+1 (502) 747-4864</strong>.</p>
 <h2>What happens next</h2>
 <div class="box"><strong>Welcome message:</strong><br>
