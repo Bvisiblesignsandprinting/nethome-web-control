@@ -287,8 +287,6 @@ function installNetHomeTrigger() {{
   pollGoogleVoice();
 }}
 """
-}
-
 
 
 def _extract_phone_digits_from_gateway(address: str) -> str:
