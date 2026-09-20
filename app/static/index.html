@@ -184,35 +184,24 @@
           <article class="card setting-card"><div class="setting-icon">☁</div><div><h2>NetHome Plus</h2><p>AC commands run directly through the hosted NetHome cloud connection. No computer worker is required.</p><span class="setting-state ok-text">Cloud connected</span></div></article>
           <article class="card setting-card"><div class="setting-icon">✓</div><div><h2>Current host</h2><p>GitHub → Vercel → Supabase → NetHome/Midea Cloud.</p><span class="setting-state ok-text">Hosted</span></div></article>
           <article class="card setting-card" style="grid-column:1/-1">
-            <div class="setting-icon">✉</div>
+            <div class="setting-icon">GV</div>
             <div style="width:100%">
-              <h2>Temporary Email Bridge</h2>
-              <p>Use this until Twilio is approved. It bypasses Gmail completely so Verizon's broken DKIM does not block your text commands.</p>
+              <h2>Google Voice Temporary Bridge</h2>
+              <p>Use this while Twilio approval is pending. Google Voice forwards incoming texts to Gmail; a one-minute Apps Script reads the command, calls this app, and replies to the same Google Voice email thread so the answer returns as a text.</p>
               <div class="form-grid" style="margin-top:14px">
-                <label class="field">Postmark inbound address
-                  <input id="email-bridge-inbound" type="email" placeholder="yourhash@inbound.postmarkapp.com">
-                </label>
                 <label class="field">Allowed mobile number
-                  <input id="email-bridge-phone" type="tel" placeholder="(555) 123-4567" autocomplete="tel">
+                  <input id="gv-allowed-phone" type="tel" placeholder="(555) 123-4567" autocomplete="tel">
                 </label>
-                <label class="field">Verified sender email
-                  <input id="email-bridge-from" type="email" placeholder="nethome@yourdomain.com">
-                </label>
-                <label class="field">Postmark Server API Token
-                  <input id="email-bridge-token" type="password" placeholder="Paste server token">
-                </label>
-                <label class="field" style="grid-column:1/-1">Postmark inbound webhook
-                  <div class="input-suffix">
-                    <input id="email-bridge-webhook" type="text" readonly>
-                    <button type="button" id="copy-email-bridge-webhook" class="secondary">Copy</button>
-                  </div>
+                <label class="field" style="grid-column:1/-1">Apps Script code
+                  <textarea id="gv-apps-script" rows="15" readonly style="width:100%;font-family:ui-monospace,SFMono-Regular,Consolas,monospace"></textarea>
                 </label>
               </div>
               <div class="form-actions" style="justify-content:flex-start">
-                <button type="button" id="save-email-bridge">Save Email Bridge</button>
-                <span id="email-bridge-state" class="setting-state">Not configured</span>
+                <button type="button" id="save-gv-config">Save Google Voice Setup</button>
+                <button type="button" id="copy-gv-script" class="secondary">Copy Apps Script</button>
+                <span id="gv-config-state" class="setting-state">Not configured</span>
               </div>
-              <p class="helper">Postmark receives the Verizon email and sends it straight to this app. The app processes the AC command and emails the reply back to your phone gateway. Gmail is not used.</p>
+              <p class="helper">In the Gmail account that receives Google Voice notifications, replace the old Apps Script with this code, save it, then run <strong>installNetHomeTrigger</strong> once. After that, text the Google Voice number normally.</p>
             </div>
           </article>
           <article class="card setting-card" style="grid-column:1/-1">
