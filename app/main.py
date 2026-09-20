@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 from contextlib import asynccontextmanager
+from html import escape
 from pathlib import Path
+from urllib.parse import parse_qs
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -44,7 +47,7 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="NetHome Web Control", version="0.3.0", lifespan=lifespan)
+app = FastAPI(title="NetHome Web Control", version="0.4.0", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.mount("/mcp", mcp_http_app)
 
@@ -140,6 +143,19 @@ def worker_auth(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid worker secret")
 
 
+def _valid_twilio_signature(url: str, params: dict[str, str], signature: str | None) -> bool:
+    """Validate Twilio's X-Twilio-Signature when TWILIO_AUTH_TOKEN is configured."""
+    token = settings.twilio_auth_token
+    if not token:
+        return True
+    if not signature:
+        return False
+    payload = url + "".join(key + params[key] for key in sorted(params))
+    digest = hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()
+    expected = base64.b64encode(digest).decode()
+    return hmac.compare_digest(signature, expected)
+
+
 @app.get("/login")
 def login_page(request: Request):
     if _valid_session(request.cookies.get(SESSION_COOKIE)):
@@ -188,6 +204,8 @@ def health():
         "device_id": settings.device_id,
         "writes_enabled": settings.allow_writes,
         "login_configured": bool(settings.login_password),
+        "control_backend": "vercel-midea-cloud",
+        "computer_required": False,
     }
 
 
@@ -204,27 +222,49 @@ def devices():
 
 @app.get("/api/device/status", dependencies=[Depends(access_auth)])
 def device_status():
-    cached = get_latest_device_state()
-    if not cached:
-        return {"ok": False, "offline": True, "error": "Local AC worker has not reported status yet."}
-    if cached["online"]:
-        return {"ok": True, "status": cached["state"], "updated_at": cached["updated_at"], "source": "local-worker"}
-    return {
-        "ok": False,
-        "offline": True,
-        "error": cached.get("error") or "Local AC worker reports the device unavailable.",
-        "updated_at": cached["updated_at"],
-        "source": "local-worker",
-    }
+    try:
+        state = midea.status()
+        save_device_state(state, True, source="cloud")
+        return {"ok": True, "status": state, "source": "vercel-cloud"}
+    except Exception as exc:
+        add_activity("cloud", "device_status", "error", str(exc)[:500])
+        cached = get_latest_device_state()
+        if cached and cached.get("online") and cached.get("state"):
+            return {
+                "ok": True,
+                "status": cached["state"],
+                "updated_at": cached.get("updated_at"),
+                "source": "cached-cloud",
+                "stale": True,
+                "warning": str(exc)[:300],
+            }
+        return {
+            "ok": False,
+            "offline": True,
+            "error": str(exc)[:500],
+            "source": "vercel-cloud",
+        }
 
 
 @app.post("/api/device/command", dependencies=[Depends(access_auth)])
 def device_command(body: DeviceCommand):
     if not settings.allow_writes:
         raise HTTPException(status_code=423, detail="AC writes are locked")
+
     command = body.model_dump(exclude_none=True)
-    queued = enqueue_device_command("web", command)
-    return {"ok": True, "queued": True, "execution_id": queued["id"], "command": command}
+    try:
+        result = midea.command(command)
+        save_device_state(result, True, source="cloud")
+        add_activity(
+            "web",
+            "device_command",
+            "success",
+            f"command={command} verified={result.get('verified', False)}",
+        )
+        return {"ok": True, "verified": bool(result.get("verified")), "result": result}
+    except Exception as exc:
+        add_activity("web", "device_command", "error", f"command={command} error={exc}")
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/worker/bootstrap-token", dependencies=[Depends(access_auth)])
@@ -298,6 +338,32 @@ def automation_run():
 @app.post("/api/message/email", dependencies=[Depends(message_auth)])
 def email_text_message(body: EmailTextRequest):
     return process_text_command(body.text)
+
+
+@app.post("/api/message/twilio")
+async def twilio_text_message(request: Request):
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = parse_qs(raw, keep_blank_values=True)
+    params = {key: values[0] if values else "" for key, values in parsed.items()}
+
+    signature = request.headers.get("X-Twilio-Signature")
+    if not _valid_twilio_signature(str(request.url), params, signature):
+        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+
+    body = params.get("Body", "")
+    sender = params.get("From", "")
+    result = process_text_command(body)
+    reply = escape(str(result.get("reply") or "Command received."))
+
+    add_activity(
+        "twilio",
+        "sms",
+        "success" if result.get("ok") else "error",
+        f"from={sender[-4:] if sender else 'unknown'} command={body[:80]}",
+    )
+
+    twiml = f'<?xml version="1.0" encoding="UTF-8"?><Response><Message>{reply}</Message></Response>'
+    return Response(content=twiml, media_type="application/xml")
 
 
 @app.get("/privacy", response_class=HTMLResponse)
