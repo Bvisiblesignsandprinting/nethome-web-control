@@ -3,8 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .db import add_activity
-from .midea_client import midea
+from .db import add_activity, enqueue_device_command, get_latest_device_state
 from .weather import comfort_recommendation, forecast_summary
 
 
@@ -45,12 +44,12 @@ def process_text_command(raw: str) -> dict[str, Any]:
                 )
                 if any(word in natural for word in ["set it", "set the ac", "do it", "based on"]):
                     try:
-                        result = midea.command({
+                        queued = enqueue_device_command("sms-email", {
                             "action": "set",
                             "mode": rec["recommended_mode"],
                             "temperature": rec["recommended_temperature"],
                         })
-                        return {"ok": True, "reply": reply + " AC command confirmed.", "result": result}
+                        return {"ok": True, "reply": reply + " AC change queued.", "result": {"execution_id": queued["id"], "queued": True}}
                     except Exception as exc:
                         return {"ok": False, "reply": reply + " " + _short_error(exc)}
                 return {"ok": True, "reply": reply}
@@ -101,7 +100,12 @@ def process_text_command(raw: str) -> dict[str, Any]:
 
     if command in {"STATUS", "MODE"}:
         try:
-            result = midea.status()
+            cached = get_latest_device_state()
+            if not cached:
+                return {"ok": False, "reply": "AC status unavailable. Local worker has not reported yet."}
+            if not cached.get("online"):
+                return {"ok": False, "reply": "AC is unavailable."}
+            result = cached.get("state") or {}
             add_activity("sms-email", "status", "success")
             mode_names = {1: "Auto", 2: "Cool", 3: "Dry", 4: "Heat", 5: "Fan"}
             mode_code = result.get("mode")
@@ -150,9 +154,12 @@ def process_text_command(raw: str) -> dict[str, Any]:
                 }
 
     try:
-        result = midea.command(payload)
-        add_activity("sms-email", "device_command", "success", str(payload))
-        return {"ok": True, "reply": f"OK. Command confirmed: {command}.", "result": result}
+        queued = enqueue_device_command("sms-email", payload)
+        return {
+            "ok": True,
+            "reply": f"Queued: {command}.",
+            "result": {"execution_id": queued["id"], "queued": True},
+        }
     except Exception as exc:
         reply = _short_error(exc)
         add_activity("sms-email", "device_command", "error", f"{payload}: {exc}")
