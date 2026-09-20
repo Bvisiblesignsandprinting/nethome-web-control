@@ -233,3 +233,43 @@ def automation_run():
 @app.post("/api/message/email", dependencies=[Depends(message_auth)])
 def email_text_message(body: EmailTextRequest):
     return process_text_command(body.text)
+
+
+@app.get("/privacy")
+def privacy_policy():
+    return {
+        "title": "Privacy Policy",
+        "brand": "NetHome AC Control",
+        "data_collected": "Phone number, SMS message content, HVAC commands, system status, and weather-related requests used to operate the service.",
+        "use": "Data is used only to provide the NetHome AC Control SMS and HVAC automation service.",
+        "sharing": "We do not sell or share your SMS opt-in data or personal information with third parties for marketing purposes.",
+        "retention": "Operational logs may be retained for troubleshooting and service reliability.",
+        "contact": "nethomeaccontrol@gmail.com",
+    }
+
+
+@app.get("/terms")
+def terms_of_service():
+    return {
+        "title": "Terms & Conditions",
+        "brand": "NetHome AC Control",
+        "program": "Private low-volume SMS service for HVAC status, weather-based recommendations, and HVAC command confirmations.",
+        "rates": "Message and data rates may apply.",
+        "frequency": "Message frequency varies based on user requests and automated replies.",
+        "help": "Reply HELP for help.",
+        "stop": "Reply STOP to opt out.",
+        "support": "nethomeaccontrol@gmail.com",
+        "carrier_notice": "Carriers are not liable for delayed or undelivered messages.",
+        "privacy": "See /privacy for the Privacy Policy.",
+    }
+
+
+@app.get("/sms-opt-in")
+def sms_opt_in_proof():
+    return {
+        "title": "NetHome AC Control SMS Opt-In",
+        "instructions": "To enroll, text START to the NetHome AC Control SMS number assigned to this service.",
+        "welcome_message": "Welcome to NetHome AC Control. This private service sends HVAC status, weather-based recommendations, and command confirmations. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
+        "confirmation": "After the welcome message, reply Y to confirm enrollment.",
+        "enrollment_confirmation": "NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.",
+    }
