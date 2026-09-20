@@ -6,8 +6,8 @@ if (-not (Test-Path ".venv")) { py -m venv .venv }
 $python = ".\.venv\Scripts\python.exe"
 
 function Invoke-Pip {
-    param([string[]]$Args)
-    & $python -m pip @Args
+    param([Parameter(ValueFromRemainingArguments=$true)][string[]]$PipArgs)
+    & $python -m pip @PipArgs
     if ($LASTEXITCODE -ne 0) {
         throw "pip failed with exit code $LASTEXITCODE"
     }
@@ -19,14 +19,14 @@ function Test-Msmart {
 }
 
 try {
-    Invoke-Pip @("install", "--upgrade", "pip")
+    Invoke-Pip "install", "--upgrade", "pip")
 }
 catch {
     Write-Host "Skipping pip upgrade because this Python 3.14 install rejects the PyPI certificate chain."
 }
 
 try {
-    Invoke-Pip @("install", "-r", "requirements.txt")
+    Invoke-Pip "install", "-r", "requirements.txt")
 }
 catch {
     Write-Host ""
@@ -34,7 +34,7 @@ catch {
     Write-Host "Retrying against the official PyPI hosts with trusted-host for this install only."
     Write-Host ""
 
-    Invoke-Pip @(
+    Invoke-Pip 
         "install",
         "--trusted-host", "pypi.org",
         "--trusted-host", "files.pythonhosted.org",
@@ -47,7 +47,7 @@ catch {
 if (-not (Test-Msmart)) {
     Write-Host ""
     Write-Host "msmart-ng is still missing. Installing it explicitly from official PyPI..."
-    Invoke-Pip @(
+    Invoke-Pip 
         "install",
         "--trusted-host", "pypi.org",
         "--trusted-host", "files.pythonhosted.org",
