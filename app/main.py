@@ -234,8 +234,12 @@ def worker_bootstrap_token():
 
 @app.get("/api/worker/next", dependencies=[Depends(worker_auth)])
 def worker_next():
-    job = claim_next_execution()
-    return {"job": job}
+    try:
+        job = claim_next_execution()
+        return {"job": job}
+    except Exception as exc:
+        add_activity("worker", "queue_claim", "error", str(exc))
+        return JSONResponse(status_code=500, content={"error": str(exc)})
 
 
 @app.post("/api/worker/{execution_id}/complete", dependencies=[Depends(worker_auth)])
