@@ -65,6 +65,9 @@ class MideaClient:
             appliance_id=settings.device_id,
             appliance_type="0xac",
         )
+        # Keep the physical NetHome Plus display in Fahrenheit. A fresh
+        # AirConditionerAppliance defaults this flag to Celsius otherwise.
+        appliance.state.fahrenheit = True
 
         # The browser sends its last known state with each command so we can
         # preserve the other AC settings without doing a slow cloud read first.
