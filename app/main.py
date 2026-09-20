@@ -217,6 +217,8 @@ def health():
         "login_configured": bool(settings.login_password),
         "control_backend": "vercel-midea-cloud",
         "computer_required": False,
+        "twilio_signature_configured": bool(settings.twilio_auth_token),
+        "sms_webhook": "/api/message/twilio",
     }
 
 
