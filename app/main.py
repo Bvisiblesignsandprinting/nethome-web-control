@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title="NetHome Web Control", version="0.4.0", lifespan=lifespan)
+app = FastAPI(title="NetHome Web Control", version="0.4.1", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.mount("/mcp", mcp_http_app)
 
