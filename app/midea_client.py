@@ -151,6 +151,9 @@ class MideaClient:
                 "connection aborted",
                 "temporarily unavailable",
                 "remote end closed",
+                "3176",
+                "reply does not exist",
+                "no reply",
             )
         )
 
@@ -328,21 +331,52 @@ class MideaClient:
             device = self._read_device(cloud)
             expected = self._apply_values(device, command)
 
-            for write_attempt in range(2):
-                self._send_state(cloud, device)
-                time.sleep(0.7)
+            verified = None
+            last_write_error: Exception | None = None
 
-                verified_device = self._read_device(cloud)
-                verified = self._state_dict(verified_device)
-                if self._matches_request(verified, expected):
-                    verified["action"] = expected["action"]
-                    verified["verified"] = True
-                    return verified
+            for write_attempt in range(3):
+                try:
+                    self._send_state(cloud, device)
+                    last_write_error = None
+                except Exception as exc:
+                    last_write_error = exc
+                    # Midea code 3176 means the cloud did not receive a reply.
+                    # The AC may still have applied the command, so verify state
+                    # before deciding that the write failed or sending it again.
+                    if not self._retryable_transport_error(exc):
+                        raise
 
-                if write_attempt == 0:
+                time.sleep(0.9 if last_write_error else 0.65)
+
+                try:
+                    verified_device = self._read_device(cloud)
+                    verified = self._state_dict(verified_device)
+                    if self._matches_request(verified, expected):
+                        verified["action"] = expected["action"]
+                        verified["verified"] = True
+                        if last_write_error:
+                            verified["verification_note"] = (
+                                "Command confirmed after Midea cloud returned no reply."
+                            )
+                        return verified
+
                     device = verified_device
                     expected = self._apply_values(device, command)
-                    time.sleep(0.4)
+                except Exception as verify_exc:
+                    if not self._retryable_transport_error(verify_exc):
+                        raise
+                    if write_attempt == 2:
+                        if last_write_error is not None:
+                            raise last_write_error
+                        raise verify_exc
+
+                if write_attempt < 2:
+                    time.sleep(0.6 * (write_attempt + 1))
+
+            if verified is None:
+                if last_write_error is not None:
+                    raise last_write_error
+                raise RuntimeError("AC state could not be verified after the command.")
 
             actual_f = None
             target_c = verified.get("target_temperature_c")
