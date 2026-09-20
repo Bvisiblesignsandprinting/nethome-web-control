@@ -52,28 +52,49 @@ class MideaClient:
             raise PermissionError("AC write commands are locked. Set NETHOME_ALLOW_WRITES=true only after read-only status is proven.")
 
         action = str(command.get("action") or "").strip().lower()
-        if action not in {"on", "off"}:
-            raise NotImplementedError("Only ON and OFF commands are implemented right now.")
+        if action not in {"on", "off", "set"}:
+            raise NotImplementedError("Supported actions are ON, OFF, and SET.")
 
         cloud = self._cloud()
-        cloud.max_retries = 2
-        cloud.request_timeout = 9
+        cloud.max_retries = 1
+        cloud.request_timeout = 6
 
-        # For power-only commands we do not need to perform a full status /
-        # capability discovery first. That extra identify round-trip is slower
-        # and can fail even when the appliance itself is online.
         from midea_beautiful.lan import LanDevice
         appliance = LanDevice(
             appliance_id=settings.device_id,
             appliance_type="0xac",
         )
-        appliance.state.running = action == "on"
+
+        # The browser sends its last known state with each command so we can
+        # preserve the other AC settings without doing a slow cloud read first.
+        mode = command.get("mode")
+        if mode not in (None, ""):
+            appliance.state.mode = int(mode)
+
+        temperature_f = command.get("temperature")
+        if temperature_f is not None:
+            appliance.state.target_temperature = (float(temperature_f) - 32.0) * 5.0 / 9.0
+
+        fan = command.get("fan")
+        if fan not in (None, ""):
+            appliance.state.fan_speed = int(float(fan))
+
+        if action == "on":
+            appliance.state.running = True
+        elif action == "off":
+            appliance.state.running = False
+        else:
+            appliance.state.running = bool(command.get("running", True))
+
         appliance.apply(cloud=cloud)
         return {
             "device_id": settings.device_id,
             "device_name": settings.device_name,
             "action": action,
             "running": bool(appliance.state.running),
+            "mode": appliance.state.mode,
+            "target_temperature_c": appliance.state.target_temperature,
+            "fan_speed": appliance.state.fan_speed,
         }
 
 
