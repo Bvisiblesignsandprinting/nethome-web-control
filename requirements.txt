@@ -6,3 +6,5 @@ midea-beautiful-air==0.10.7
 pip-system-certs>=4,<5
 psycopg[binary]>=3.2,<4
 mcp>=1.26,<2
+
+msmart-ng==2026.9.0
