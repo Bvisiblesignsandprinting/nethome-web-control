@@ -143,17 +143,28 @@ def worker_auth(authorization: str | None = Header(default=None)) -> None:
         raise HTTPException(status_code=401, detail="Invalid worker secret")
 
 
-def _valid_twilio_signature(url: str, params: dict[str, str], signature: str | None) -> bool:
-    """Validate Twilio's X-Twilio-Signature when TWILIO_AUTH_TOKEN is configured."""
+def _valid_twilio_signature(
+    url: str,
+    params: dict[str, str],
+    signature: str | None,
+    fallback_token: str | None,
+) -> bool:
+    """Validate Twilio, or a secret URL token until Twilio auth is configured."""
     token = settings.twilio_auth_token
-    if not token:
-        return True
-    if not signature:
-        return False
-    payload = url + "".join(key + params[key] for key in sorted(params))
-    digest = hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()
-    expected = base64.b64encode(digest).decode()
-    return hmac.compare_digest(signature, expected)
+    if token:
+        if not signature:
+            return False
+        payload = url + "".join(key + params[key] for key in sorted(params))
+        digest = hmac.new(token.encode(), payload.encode(), hashlib.sha1).digest()
+        expected = base64.b64encode(digest).decode()
+        return hmac.compare_digest(signature, expected)
+
+    expected = settings.message_secret
+    return bool(
+        expected
+        and fallback_token
+        and hmac.compare_digest(fallback_token, expected)
+    )
 
 
 @app.get("/login")
@@ -274,26 +285,18 @@ def worker_bootstrap_token():
 
 @app.get("/api/worker/next", dependencies=[Depends(worker_auth)])
 def worker_next():
-    try:
-        job = claim_next_execution()
-        return {"job": job}
-    except Exception as exc:
-        add_activity("worker", "queue_claim", "error", str(exc))
-        return JSONResponse(status_code=500, content={"error": str(exc)})
+    # The Windows worker is retired. Direct Vercel cloud control is authoritative.
+    return {"job": None, "retired": True}
 
 
 @app.post("/api/worker/{execution_id}/complete", dependencies=[Depends(worker_auth)])
 def worker_complete(execution_id: int, body: WorkerCompleteRequest):
-    status = "success" if body.ok else "failed"
-    finish_schedule_execution(execution_id, status, result=body.result, error=body.error)
-    add_activity("worker", "device_command", status, f"execution_id={execution_id} error={body.error or ''}")
-    return {"ok": True}
+    return JSONResponse(status_code=410, content={"ok": False, "retired": True})
 
 
 @app.post("/api/worker/state", dependencies=[Depends(worker_auth)])
 def worker_state(body: WorkerStateRequest):
-    save_device_state(body.state, body.online, body.error)
-    return {"ok": True}
+    return {"ok": True, "retired": True}
 
 
 @app.get("/api/schedules", dependencies=[Depends(access_auth)])
@@ -347,8 +350,9 @@ async def twilio_text_message(request: Request):
     params = {key: values[0] if values else "" for key, values in parsed.items()}
 
     signature = request.headers.get("X-Twilio-Signature")
-    if not _valid_twilio_signature(str(request.url), params, signature):
-        raise HTTPException(status_code=403, detail="Invalid Twilio signature")
+    fallback_token = request.query_params.get("token")
+    if not _valid_twilio_signature(str(request.url), params, signature, fallback_token):
+        raise HTTPException(status_code=403, detail="Invalid Twilio webhook authentication")
 
     body = params.get("Body", "")
     sender = params.get("From", "")
