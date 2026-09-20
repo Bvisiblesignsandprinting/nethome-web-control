@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import ssl
 import os
 import time
 import urllib.error
@@ -17,6 +18,10 @@ STATUS_SECONDS = float(os.getenv("NETHOME_WORKER_STATUS_SECONDS", "120"))
 
 SERVICE = "NetHomeWebControl"
 WORKER_TOKEN_KEY = "worker_token"
+
+_SSL_CONTEXT = ssl.create_default_context()
+if hasattr(ssl, "VERIFY_X509_STRICT"):
+    _SSL_CONTEXT.verify_flags &= ~ssl.VERIFY_X509_STRICT
 
 
 def _token() -> str:
@@ -44,7 +49,7 @@ def _request(path: str, method: str = "GET", body: dict | None = None) -> dict:
             "Content-Type": "application/json",
         },
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CONTEXT) as resp:
         return json.loads(resp.read().decode() or "{}")
 
 
