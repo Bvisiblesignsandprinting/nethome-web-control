@@ -26,6 +26,7 @@ class MideaClient:
             cloud=cloud,
             use_cloud=True,
             appliance_id=settings.device_id,
+            appliance_type="0xac",
             retries=2,
             cloud_timeout=9,
         )
@@ -39,7 +40,29 @@ class MideaClient:
     def command(self, command: dict[str, Any]) -> dict[str, Any]:
         if not settings.allow_writes:
             raise PermissionError("AC write commands are locked. Set NETHOME_ALLOW_WRITES=true only after read-only status is proven.")
-        raise NotImplementedError("Write commands stay intentionally locked until the live device is back online and read-only status is verified.")
+
+        action = str(command.get("action") or "").strip().lower()
+        if action not in {"on", "off"}:
+            raise NotImplementedError("Only ON and OFF commands are implemented right now.")
+
+        cloud = self._cloud()
+        from midea_beautiful.lan import appliance_state
+        appliance = appliance_state(
+            cloud=cloud,
+            use_cloud=True,
+            appliance_id=settings.device_id,
+            appliance_type="0xac",
+            retries=2,
+            cloud_timeout=9,
+        )
+        appliance.state.running = action == "on"
+        appliance.apply(cloud=cloud)
+        return {
+            "device_id": settings.device_id,
+            "device_name": settings.device_name,
+            "action": action,
+            "running": bool(appliance.state.running),
+        }
 
 
 midea = MideaClient()
