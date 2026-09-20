@@ -94,8 +94,19 @@ class MideaClient:
         return cloud
 
     def _cloud(self):
+        # Reconcile each warm Vercel instance with the shared Supabase session.
+        # This prevents a warm function from reviving an older session after
+        # another instance has already refreshed authentication.
+        saved = load_cloud_session()
         if self._cloud_client is not None:
-            return self._cloud_client
+            current_session = dict(getattr(self._cloud_client, "_session", {}) or {})
+            current_id = current_session.get("sessionId")
+            saved_session = saved.get("session") if isinstance(saved, dict) else None
+            saved_id = saved_session.get("sessionId") if isinstance(saved_session, dict) else None
+            if not saved_id or current_id == saved_id:
+                return self._cloud_client
+            self._cloud_client = None
+
         cloud = self._restore_cloud()
         if cloud is None:
             cloud = self._fresh_cloud()
