@@ -3,6 +3,7 @@ from __future__ import annotations
 import getpass
 import http.cookiejar
 import json
+import ssl
 import urllib.request
 
 import keyring
@@ -15,7 +16,18 @@ base = base.rstrip("/")
 password = getpass.getpass("Website login password: ")
 
 jar = http.cookiejar.CookieJar()
-opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(jar))
+
+# Python 3.14 enables stricter X.509 checks that reject some otherwise
+# Windows-trusted certificate chains (for example, chains missing AKI).
+# Keep normal certificate verification, but disable only X509_STRICT.
+context = ssl.create_default_context()
+if hasattr(ssl, "VERIFY_X509_STRICT"):
+    context.verify_flags &= ~ssl.VERIFY_X509_STRICT
+
+opener = urllib.request.build_opener(
+    urllib.request.HTTPCookieProcessor(jar),
+    urllib.request.HTTPSHandler(context=context),
+)
 
 login = urllib.request.Request(
     base + "/api/login",
