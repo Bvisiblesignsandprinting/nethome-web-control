@@ -101,6 +101,24 @@ def _send_state() -> None:
 def _run_job(job: dict) -> None:
     execution_id = int(job["id"])
     command = _normalize_command(job.get("command"))
+
+    # Never execute an old immediate web/SMS command after the worker has been
+    # offline. Scheduled jobs have a schedule_id and are handled separately.
+    if job.get("schedule_id") is None:
+        try:
+            scheduled_for = datetime.fromisoformat(str(job.get("scheduled_for")).replace("Z", "+00:00"))
+            age = (datetime.now(timezone.utc) - scheduled_for.astimezone(timezone.utc)).total_seconds()
+            if age > 300:
+                _request(
+                    f"/api/worker/{execution_id}/complete",
+                    "POST",
+                    {"ok": False, "error": "Stale queued command skipped after worker restart."},
+                )
+                print(f"job #{execution_id}: skipped stale command ({int(age)}s old)")
+                return
+        except Exception:
+            pass
+
     print(f"job #{execution_id}: {command}")
     try:
         result = midea.command(command)
