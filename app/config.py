@@ -41,6 +41,7 @@ class Settings:
     login_password: str | None = os.getenv("NETHOME_LOGIN_PASSWORD") or None
     account: str | None = os.getenv("NETHOME_ACCOUNT") or None
     password: str | None = os.getenv("NETHOME_PASSWORD") or None
+    twilio_auth_token: str | None = os.getenv("TWILIO_AUTH_TOKEN") or None
 
 
 settings = Settings()
