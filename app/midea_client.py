@@ -7,12 +7,18 @@ from .credentials import load_credentials
 
 
 class MideaClient:
-    def _cloud(self):
+    def __init__(self):
+        self._cloud_client = None
+
+    def _cloud(self, force: bool = False):
+        if self._cloud_client is not None and not force:
+            return self._cloud_client
         account, password = load_credentials()
         if not account or not password:
             raise RuntimeError("NetHome Plus credentials are not configured")
         from midea_beautiful import connect_to_cloud
-        return connect_to_cloud(account=account, password=password)
+        self._cloud_client = connect_to_cloud(account=account, password=password)
+        return self._cloud_client
 
     def account_devices(self) -> list[dict[str, Any]]:
         cloud = self._cloud()
@@ -125,7 +131,7 @@ class MideaClient:
             if any(token in message for token in ("3144", "3106", "loginid is empty", "invalidsession")):
                 # Midea sessions can be invalidated when several commands arrive
                 # close together. Start one completely fresh login and retry once.
-                cloud = self._cloud()
+                cloud = self._cloud(force=True)
                 cloud.max_retries = 1
                 cloud.request_timeout = 6
                 cloud.appliance_transparent_send(settings.device_id, data)
