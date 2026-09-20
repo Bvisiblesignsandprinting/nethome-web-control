@@ -14,6 +14,14 @@ from .db import (
 
 T = TypeVar("T")
 
+# This AC uses Midea's BB/sub-protocol mode numbering even when it accepts
+# the legacy X40 control frame. The physical unit confirmed this mapping:
+# wire 0=Cool, 1=Dry, 2=Auto, 3=Heat, 4=Fan.
+# Keep the website/SMS/schedule API on the normal logical numbering
+# 1=Auto, 2=Cool, 3=Dry, 4=Heat, 5=Fan.
+LOGICAL_TO_WIRE_MODE = {1: 2, 2: 0, 3: 1, 4: 3, 5: 4}
+WIRE_TO_LOGICAL_MODE = {wire: logical for logical, wire in LOGICAL_TO_WIRE_MODE.items()}
+
 
 class MideaClient:
     """Serverless-safe NetHome Plus cloud controller.
@@ -190,12 +198,18 @@ class MideaClient:
     @staticmethod
     def _state_dict(device) -> dict[str, Any]:
         state = device.state
+        wire_mode = getattr(state, "mode", None)
+        try:
+            logical_mode = WIRE_TO_LOGICAL_MODE.get(int(wire_mode), int(wire_mode))
+        except (TypeError, ValueError):
+            logical_mode = wire_mode
         return {
             "device_id": settings.device_id,
             "device_name": settings.device_name,
             "raw": str(state),
             "running": bool(getattr(state, "running", False)),
-            "mode": getattr(state, "mode", None),
+            "mode": logical_mode,
+            "wire_mode": wire_mode,
             "fan_speed": getattr(state, "fan_speed", None),
             "target_temperature_c": getattr(state, "target_temperature", None),
             "indoor_temperature_c": getattr(state, "indoor_temperature", None),
@@ -230,10 +244,21 @@ class MideaClient:
         state.fahrenheit = True
 
         mode = command.get("mode")
+        requested_logical_mode = None
         if mode not in (None, ""):
-            mode_map = {"auto": 1, "cool": 2, "dry": 3, "heat": 4, "fan": 5, "fan_only": 5}
+            mode_map = {
+                "auto": 1,
+                "cool": 2,
+                "dry": 3,
+                "heat": 4,
+                "fan": 5,
+                "fan_only": 5,
+            }
             mode_value = mode_map.get(str(mode).strip().lower(), mode)
-            state.mode = int(float(mode_value))
+            requested_logical_mode = int(float(mode_value))
+            if requested_logical_mode not in LOGICAL_TO_WIRE_MODE:
+                raise ValueError(f"Unsupported AC mode: {mode}")
+            state.mode = LOGICAL_TO_WIRE_MODE[requested_logical_mode]
 
         temperature_f = command.get("temperature")
         requested_c = None
@@ -261,7 +286,7 @@ class MideaClient:
 
         return {
             "action": action,
-            "requested_mode": int(state.mode) if mode not in (None, "") else None,
+            "requested_mode": requested_logical_mode,
             "requested_temperature_c": requested_c,
             "requested_running": bool(state.running) if action in {"on", "off"} or command.get("running") is not None else None,
         }
