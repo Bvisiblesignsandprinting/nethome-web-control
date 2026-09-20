@@ -22,6 +22,7 @@ from .db import (
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
+from .messaging import process_text_command
 from .models import DeviceCommand, ScheduleCreate, ScheduleUpdate
 from .scheduler import run_due_schedules
 
@@ -76,6 +77,11 @@ def access_auth(
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class EmailTextRequest(BaseModel):
+    text: str
+    sender: str | None = None
 
 
 def automation_auth(authorization: str | None = Header(default=None)) -> None:
@@ -211,3 +217,8 @@ def activity(limit: int = 50):
 @app.post("/api/automation/run", dependencies=[Depends(automation_auth)])
 def automation_run():
     return run_due_schedules()
+
+
+@app.post("/api/message/email", dependencies=[Depends(access_auth)])
+def email_text_message(body: EmailTextRequest):
+    return process_text_command(body.text)
