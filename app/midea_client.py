@@ -60,17 +60,31 @@ class MideaClient:
         cloud.max_retries = 1
         cloud.request_timeout = 6
 
-        from midea_beautiful.lan import LanDevice
-        appliance = LanDevice(
-            appliance_id=settings.device_id,
-            appliance_type="0xac",
-        )
-        # Keep the physical NetHome Plus display in Fahrenheit. A fresh
-        # AirConditionerAppliance defaults this flag to Celsius otherwise.
+        from midea_beautiful.lan import LanDevice, appliance_state
+
+        if action == "set":
+            # Mode / temperature / fan changes must start from the unit's real
+            # current state. Building a blank AC state can produce a valid
+            # power command while other settings are ignored by some models.
+            appliance = appliance_state(
+                cloud=cloud,
+                use_cloud=True,
+                appliance_id=settings.device_id,
+                appliance_type="0xac",
+                retries=1,
+                cloud_timeout=6,
+            )
+        else:
+            # Power-only commands can stay fast and do not need a pre-read.
+            appliance = LanDevice(
+                appliance_id=settings.device_id,
+                appliance_type="0xac",
+            )
+
+        # Preserve Fahrenheit on every command.
         appliance.state.fahrenheit = True
 
-        # The browser sends its last known state with each command so we can
-        # preserve the other AC settings without doing a slow cloud read first.
+        # Apply only the requested values to the current state.
         mode = command.get("mode")
         if mode not in (None, ""):
             appliance.state.mode = int(mode)
