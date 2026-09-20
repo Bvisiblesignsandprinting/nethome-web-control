@@ -24,7 +24,18 @@ class _TLSAdapter(HTTPAdapter):
 
 _MIDEA_SESSION = requests.Session()
 _MIDEA_SESSION.mount("https://", _TLSAdapter())
-requests.post = _MIDEA_SESSION.post
+
+_original_session_request = requests.sessions.Session.request
+def _midea_compatible_request(self, method, url, **kwargs):
+    # Python 3.14 rejects the legacy NetHome/Midea certificate chain because
+    # an intermediate certificate is missing Authority Key Identifier.
+    # Limit this compatibility exception strictly to the Midea cloud host.
+    if str(url).startswith("https://mapp.appsmb.com/"):
+        kwargs["verify"] = False
+    return _original_session_request(self, method, url, **kwargs)
+
+requests.sessions.Session.request = _midea_compatible_request
+requests.packages.urllib3.disable_warnings()
 
 from app.midea_client import midea
 
