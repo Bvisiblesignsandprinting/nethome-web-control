@@ -11,7 +11,6 @@ from .db import (
     finish_schedule_execution,
     list_schedules,
 )
-from .midea_client import midea
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -159,6 +158,24 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             item["reason"] = "writes_locked"
             summary["skipped"] += 1
             summary["executions"].append(item)
+            continue
+
+        # Leave the claimed execution as pending so the always-on local worker
+        # can execute it with the persistent NetHome Plus session.
+        if _use_worker_queue := True:
+            # claim_schedule_execution creates the row as pending. It is now
+            # the worker's job to claim and complete it.
+            item["status"] = "queued"
+            add_activity(
+                "scheduler",
+                "schedule_execute",
+                "queued",
+                f"schedule_id={schedule['id']} execution_id={execution_id}",
+            )
+            summary["executions"].append(item)
+            continue
+
+
             continue
 
         try:
