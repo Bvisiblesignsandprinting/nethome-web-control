@@ -24,6 +24,11 @@ class Settings:
         or os.getenv("NETHOME_API_TOKEN")
         or None
     )
+    message_secret: str | None = (
+        os.getenv("NETHOME_MESSAGE_SECRET")
+        or os.getenv("NETHOME_API_TOKEN")
+        or None
+    )
     login_password: str | None = os.getenv("NETHOME_LOGIN_PASSWORD") or None
     account: str | None = os.getenv("NETHOME_ACCOUNT") or None
     password: str | None = os.getenv("NETHOME_PASSWORD") or None
