@@ -35,6 +35,16 @@ class MideaClient:
             "device_id": settings.device_id,
             "device_name": settings.device_name,
             "raw": str(state),
+            "running": bool(getattr(state, "running", False)),
+            "mode": getattr(state, "mode", None),
+            "fan_speed": getattr(state, "fan_speed", None),
+            "target_temperature_c": getattr(state, "target_temperature", None),
+            "indoor_temperature_c": getattr(state, "indoor_temperature", None),
+            "outdoor_temperature_c": getattr(state, "outdoor_temperature", None),
+            "vertical_swing": getattr(state, "vertical_swing", None),
+            "horizontal_swing": getattr(state, "horizontal_swing", None),
+            "eco_mode": getattr(state, "eco_mode", None),
+            "comfort_sleep": getattr(state, "comfort_sleep", None),
         }
 
     def command(self, command: dict[str, Any]) -> dict[str, Any]:
