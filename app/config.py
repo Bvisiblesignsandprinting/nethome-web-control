@@ -29,6 +29,12 @@ class Settings:
         or os.getenv("NETHOME_API_TOKEN")
         or None
     )
+    worker_secret: str | None = (
+        os.getenv("NETHOME_WORKER_SECRET")
+        or os.getenv("NETHOME_AUTOMATION_SECRET")
+        or os.getenv("NETHOME_API_TOKEN")
+        or None
+    )
     weather_latitude: float = float(os.getenv("NETHOME_WEATHER_LATITUDE", "41.3318"))
     weather_longitude: float = float(os.getenv("NETHOME_WEATHER_LONGITUDE", "-74.1868"))
     weather_timezone: str = os.getenv("NETHOME_WEATHER_TIMEZONE", "America/New_York")
