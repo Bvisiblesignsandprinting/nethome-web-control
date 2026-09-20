@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "nethome.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
+_LOCAL_CLOUD_LOCK = threading.RLock()
+_CLOUD_LOCK_KEY = 151732606
 
 
 def _now() -> str:
@@ -31,6 +35,108 @@ def _pg_conn():
     from psycopg.rows import dict_row
 
     return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+
+@contextmanager
+def cloud_operation_lock():
+    """Serialize NetHome/Midea cloud calls across all Vercel instances."""
+    if _use_postgres():
+        conn = _pg_conn()
+        try:
+            with conn:
+                with conn.cursor() as cur:
+                    cur.execute("set local lock_timeout = '25s'")
+                    cur.execute("select pg_advisory_xact_lock(%s)", (_CLOUD_LOCK_KEY,))
+                yield
+        finally:
+            conn.close()
+        return
+
+    with _LOCAL_CLOUD_LOCK:
+        yield
+
+
+def load_cloud_session() -> dict[str, Any] | None:
+    """Load the most recent server-side Midea auth session.
+
+    The row is intentionally excluded from the user-facing activity feed.
+    """
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                select result, details
+                from public.activity
+                where source = 'cloud-auth' and action = 'session'
+                order by id desc
+                limit 1
+                """
+            )
+            row = cur.fetchone()
+            row = _normalize_row(row)
+    else:
+        with _sqlite_conn() as conn:
+            raw = conn.execute(
+                """
+                select result, details
+                from activity
+                where source = 'cloud-auth' and action = 'session'
+                order by id desc
+                limit 1
+                """
+            ).fetchone()
+        row = dict(raw) if raw else None
+
+    if not row or row.get("result") != "active":
+        return None
+    try:
+        data = json.loads(row.get("details") or "{}")
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def save_cloud_session(data: dict[str, Any]) -> None:
+    payload = json.dumps(data, separators=(",", ":"))
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "delete from public.activity where source = 'cloud-auth' and action = 'session'"
+            )
+            cur.execute(
+                """
+                insert into public.activity(source, action, result, details)
+                values ('cloud-auth', 'session', 'active', %s)
+                """,
+                (payload,),
+            )
+        return
+
+    with _sqlite_conn() as conn:
+        conn.execute(
+            "delete from activity where source = 'cloud-auth' and action = 'session'"
+        )
+        conn.execute(
+            """
+            insert into activity(created_at, source, action, result, details)
+            values (?, 'cloud-auth', 'session', 'active', ?)
+            """,
+            (_now(), payload),
+        )
+
+
+def clear_cloud_session() -> None:
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "delete from public.activity where source = 'cloud-auth' and action = 'session'"
+            )
+        return
+
+    with _sqlite_conn() as conn:
+        conn.execute(
+            "delete from activity where source = 'cloud-auth' and action = 'session'"
+        )
 
 
 def _ensure_schedule_columns(conn: sqlite3.Connection) -> None:
@@ -257,14 +363,14 @@ def list_activity(limit: int = 50) -> list[dict[str, Any]]:
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "select * from public.activity order by id desc limit %s",
+                "select * from public.activity where source <> 'cloud-auth' order by id desc limit %s",
                 (limit,),
             )
             return [_normalize_row(r) for r in cur.fetchall()]
 
     with _sqlite_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM activity WHERE source <> 'cloud-auth' ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -429,10 +535,15 @@ def claim_next_execution() -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
-def save_device_state(state: dict[str, Any] | None, online: bool, error: str | None = None) -> None:
+def save_device_state(
+    state: dict[str, Any] | None,
+    online: bool,
+    error: str | None = None,
+    source: str = "cloud",
+) -> None:
     details = json.dumps(state or {}, separators=(",", ":"))
     add_activity(
-        "worker",
+        source,
         "device_state",
         "online" if online else "offline",
         details if online else json.dumps({"state": state or {}, "error": error}, separators=(",", ":")),
@@ -446,7 +557,7 @@ def get_latest_device_state() -> dict[str, Any] | None:
                 """
                 select created_at, result, details
                 from public.activity
-                where source = 'worker' and action = 'device_state'
+                where source in ('cloud', 'worker') and action = 'device_state'
                 order by id desc
                 limit 1
                 """
@@ -459,7 +570,7 @@ def get_latest_device_state() -> dict[str, Any] | None:
                 """
                 SELECT created_at, result, details
                 FROM activity
-                WHERE source = 'worker' AND action = 'device_state'
+                WHERE source IN ('cloud', 'worker') AND action = 'device_state'
                 ORDER BY id DESC
                 LIMIT 1
                 """
