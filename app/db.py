@@ -408,19 +408,11 @@ def claim_next_execution() -> dict[str, Any] | None:
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
                 """
-                with next_job as (
-                    select id
-                    from public.schedule_executions
-                    where status = 'pending'
-                    order by scheduled_for, id
-                    for update skip locked
-                    limit 1
-                )
-                update public.schedule_executions e
-                set status = 'claimed'
-                from next_job
-                where e.id = next_job.id
-                returning e.*
+                select *
+                from public.schedule_executions
+                where status = 'pending'
+                order by scheduled_for, id
+                limit 1
                 """
             )
             return _normalize_row(cur.fetchone())
@@ -434,17 +426,7 @@ def claim_next_execution() -> dict[str, Any] | None:
             LIMIT 1
             """
         ).fetchone()
-        if not row:
-            return None
-        conn.execute(
-            "UPDATE schedule_executions SET status = 'claimed' WHERE id = ? AND status = 'pending'",
-            (row["id"],),
-        )
-        claimed = conn.execute(
-            "SELECT * FROM schedule_executions WHERE id = ?",
-            (row["id"],),
-        ).fetchone()
-    return dict(claimed) if claimed else None
+    return dict(row) if row else None
 
 
 def save_device_state(state: dict[str, Any] | None, online: bool, error: str | None = None) -> None:
