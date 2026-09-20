@@ -13,11 +13,16 @@ from pydantic import BaseModel
 from .config import settings
 from .db import (
     add_activity,
+    claim_next_execution,
     create_schedule,
     delete_schedule,
+    enqueue_device_command,
+    finish_schedule_execution,
+    get_latest_device_state,
     init_db,
     list_activity,
     list_schedules,
+    save_device_state,
     update_schedule,
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
@@ -84,6 +89,18 @@ class EmailTextRequest(BaseModel):
     sender: str | None = None
 
 
+class WorkerCompleteRequest(BaseModel):
+    ok: bool
+    result: dict | None = None
+    error: str | None = None
+
+
+class WorkerStateRequest(BaseModel):
+    online: bool
+    state: dict | None = None
+    error: str | None = None
+
+
 def automation_auth(authorization: str | None = Header(default=None)) -> None:
     expected = settings.automation_secret
     if not expected:
@@ -104,6 +121,14 @@ def message_auth(authorization: str | None = Header(default=None)) -> None:
         )
     if authorization != f"Bearer {expected}":
         raise HTTPException(status_code=401, detail="Invalid messaging secret")
+
+
+def worker_auth(authorization: str | None = Header(default=None)) -> None:
+    expected = settings.worker_secret
+    if not expected:
+        raise HTTPException(status_code=503, detail="Worker secret is not configured")
+    if authorization != f"Bearer {expected}":
+        raise HTTPException(status_code=401, detail="Invalid worker secret")
 
 
 @app.get("/login")
@@ -170,28 +195,47 @@ def devices():
 
 @app.get("/api/device/status", dependencies=[Depends(access_auth)])
 def device_status():
-    try:
-        result = midea.status()
-        add_activity("web", "status", "success")
-        return {"ok": True, "status": result}
-    except Exception as exc:
-        add_activity("web", "status", "error", str(exc))
-        return {"ok": False, "offline": "offline" in str(exc).lower(), "error": str(exc)}
+    cached = get_latest_device_state()
+    if not cached:
+        return {"ok": False, "offline": True, "error": "Local AC worker has not reported status yet."}
+    if cached["online"]:
+        return {"ok": True, "status": cached["state"], "updated_at": cached["updated_at"], "source": "local-worker"}
+    return {
+        "ok": False,
+        "offline": True,
+        "error": cached.get("error") or "Local AC worker reports the device unavailable.",
+        "updated_at": cached["updated_at"],
+        "source": "local-worker",
+    }
 
 
 @app.post("/api/device/command", dependencies=[Depends(access_auth)])
 def device_command(body: DeviceCommand):
-    try:
-        result = midea.command(body.model_dump(exclude_none=True))
-        add_activity("api", "device_command", "success", str(body.model_dump(exclude_none=True)))
-        return {"ok": True, "result": result}
-    except PermissionError as exc:
-        raise HTTPException(status_code=423, detail=str(exc)) from exc
-    except NotImplementedError as exc:
-        raise HTTPException(status_code=501, detail=str(exc)) from exc
-    except Exception as exc:
-        add_activity("api", "device_command", "error", str(exc))
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if not settings.allow_writes:
+        raise HTTPException(status_code=423, detail="AC writes are locked")
+    command = body.model_dump(exclude_none=True)
+    queued = enqueue_device_command("web", command)
+    return {"ok": True, "queued": True, "execution_id": queued["id"], "command": command}
+
+
+@app.get("/api/worker/next", dependencies=[Depends(worker_auth)])
+def worker_next():
+    job = claim_next_execution()
+    return {"job": job}
+
+
+@app.post("/api/worker/{execution_id}/complete", dependencies=[Depends(worker_auth)])
+def worker_complete(execution_id: int, body: WorkerCompleteRequest):
+    status = "success" if body.ok else "failed"
+    finish_schedule_execution(execution_id, status, result=body.result, error=body.error)
+    add_activity("worker", "device_command", status, f"execution_id={execution_id} error={body.error or ''}")
+    return {"ok": True}
+
+
+@app.post("/api/worker/state", dependencies=[Depends(worker_auth)])
+def worker_state(body: WorkerStateRequest):
+    save_device_state(body.state, body.online, body.error)
+    return {"ok": True}
 
 
 @app.get("/api/schedules", dependencies=[Depends(access_auth)])
