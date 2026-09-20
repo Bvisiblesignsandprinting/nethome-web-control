@@ -9,9 +9,7 @@ from .weather import comfort_recommendation, forecast_summary
 
 
 HELP_TEXT = (
-    "Try: status, weather today, weather tomorrow, what should I set it to, "
-    "set it based on the weather, turn it off, cool to 72, heat to 70. "
-    "AC changes remain locked until live control is enabled."
+    "Commands: STATUS, ON, OFF, COOL 72, HEAT 70, FAN HIGH, WEATHER TODAY, HELP."
 )
 
 
@@ -101,11 +99,29 @@ def process_text_command(raw: str) -> dict[str, Any]:
     if command in {"HELP", "?", "COMMANDS"}:
         return {"ok": True, "reply": HELP_TEXT}
 
-    if command == "STATUS":
+    if command in {"STATUS", "MODE"}:
         try:
             result = midea.status()
             add_activity("sms-email", "status", "success")
-            return {"ok": True, "reply": f"AC status: {result}"}
+            mode_names = {1: "Auto", 2: "Cool", 3: "Dry", 4: "Heat", 5: "Fan"}
+            mode_code = result.get("mode")
+            if command == "MODE":
+                return {"ok": True, "reply": f"Mode code {mode_code} ({mode_names.get(mode_code, 'Unknown')})."}
+            def _f(c):
+                return None if c is None else round((float(c) * 9 / 5) + 32)
+            power = "ON" if result.get("running") else "OFF"
+            mode = mode_names.get(mode_code, f"Mode {mode_code}")
+            target = _f(result.get("target_temperature_c"))
+            indoor = _f(result.get("indoor_temperature_c"))
+            fan = result.get("fan_speed")
+            parts = [power, mode]
+            if target is not None:
+                parts.append(f"{target}F")
+            if indoor is not None:
+                parts.append(f"Room {indoor}F")
+            if fan is not None:
+                parts.append(f"Fan {fan}%")
+            return {"ok": True, "reply": " | ".join(parts)}
         except Exception as exc:
             reply = _short_error(exc)
             add_activity("sms-email", "status", "error", str(exc))
