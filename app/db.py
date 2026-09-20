@@ -362,3 +362,144 @@ def finish_schedule_execution(
                 execution_id,
             ),
         )
+
+
+def enqueue_device_command(source: str, command: dict[str, Any]) -> dict[str, Any]:
+    """Queue an immediate AC command for the always-on worker."""
+    scheduled_for = datetime.now(timezone.utc)
+    if _use_postgres():
+        from psycopg.types.json import Jsonb
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                insert into public.schedule_executions(
+                    schedule_id, scheduled_for, status, command
+                ) values (null, %s, 'pending', %s)
+                returning *
+                """,
+                (scheduled_for, Jsonb(command)),
+            )
+            row = _normalize_row(cur.fetchone())
+        add_activity(source, "device_command_queued", "pending", f"execution_id={row['id']} command={command}")
+        return row
+
+    created_at = _now()
+    with _sqlite_conn() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO schedule_executions(
+                schedule_id, scheduled_for, status, command, created_at
+            ) VALUES (NULL, ?, 'pending', ?, ?)
+            """,
+            (scheduled_for.isoformat(), json.dumps(command), created_at),
+        )
+        row = conn.execute(
+            "SELECT * FROM schedule_executions WHERE id = ?",
+            (cur.lastrowid,),
+        ).fetchone()
+    result = dict(row)
+    add_activity(source, "device_command_queued", "pending", f"execution_id={result['id']} command={command}")
+    return result
+
+
+def claim_next_execution() -> dict[str, Any] | None:
+    """Atomically claim the oldest pending command for the local worker."""
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                with next_job as (
+                    select id
+                    from public.schedule_executions
+                    where status = 'pending'
+                    order by scheduled_for, id
+                    for update skip locked
+                    limit 1
+                )
+                update public.schedule_executions e
+                set status = 'claimed'
+                from next_job
+                where e.id = next_job.id
+                returning e.*
+                """
+            )
+            return _normalize_row(cur.fetchone())
+
+    with _sqlite_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM schedule_executions
+            WHERE status = 'pending'
+            ORDER BY scheduled_for, id
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE schedule_executions SET status = 'claimed' WHERE id = ? AND status = 'pending'",
+            (row["id"],),
+        )
+        claimed = conn.execute(
+            "SELECT * FROM schedule_executions WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+    return dict(claimed) if claimed else None
+
+
+def save_device_state(state: dict[str, Any] | None, online: bool, error: str | None = None) -> None:
+    details = json.dumps(state or {}, separators=(",", ":"))
+    add_activity(
+        "worker",
+        "device_state",
+        "online" if online else "offline",
+        details if online else json.dumps({"state": state or {}, "error": error}, separators=(",", ":")),
+    )
+
+
+def get_latest_device_state() -> dict[str, Any] | None:
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                select created_at, result, details
+                from public.activity
+                where source = 'worker' and action = 'device_state'
+                order by id desc
+                limit 1
+                """
+            )
+            row = cur.fetchone()
+            row = _normalize_row(row)
+    else:
+        with _sqlite_conn() as conn:
+            raw = conn.execute(
+                """
+                SELECT created_at, result, details
+                FROM activity
+                WHERE source = 'worker' AND action = 'device_state'
+                ORDER BY id DESC
+                LIMIT 1
+                """
+            ).fetchone()
+        row = dict(raw) if raw else None
+
+    if not row:
+        return None
+    try:
+        payload = json.loads(row.get("details") or "{}")
+    except Exception:
+        payload = {}
+    online = row.get("result") == "online"
+    if online:
+        state = payload
+        error = None
+    else:
+        state = payload.get("state") if isinstance(payload, dict) else {}
+        error = payload.get("error") if isinstance(payload, dict) else None
+    return {
+        "updated_at": row.get("created_at"),
+        "online": online,
+        "state": state or {},
+        "error": error,
+    }
