@@ -189,6 +189,9 @@ def device_command(body: DeviceCommand):
         raise HTTPException(status_code=423, detail=str(exc)) from exc
     except NotImplementedError as exc:
         raise HTTPException(status_code=501, detail=str(exc)) from exc
+    except Exception as exc:
+        add_activity("api", "device_command", "error", str(exc))
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.get("/api/schedules", dependencies=[Depends(access_auth)])
