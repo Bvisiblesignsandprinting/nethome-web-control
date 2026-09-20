@@ -56,14 +56,16 @@ class MideaClient:
             raise NotImplementedError("Only ON and OFF commands are implemented right now.")
 
         cloud = self._cloud()
-        from midea_beautiful.lan import appliance_state
-        appliance = appliance_state(
-            cloud=cloud,
-            use_cloud=True,
+        cloud.max_retries = 2
+        cloud.request_timeout = 9
+
+        # For power-only commands we do not need to perform a full status /
+        # capability discovery first. That extra identify round-trip is slower
+        # and can fail even when the appliance itself is online.
+        from midea_beautiful.lan import LanDevice
+        appliance = LanDevice(
             appliance_id=settings.device_id,
             appliance_type="0xac",
-            retries=2,
-            cloud_timeout=9,
         )
         appliance.state.running = action == "on"
         appliance.apply(cloud=cloud)
