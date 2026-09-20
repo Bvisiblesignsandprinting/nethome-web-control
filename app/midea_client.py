@@ -16,11 +16,13 @@ T = TypeVar("T")
 
 # This AC uses Midea's BB/sub-protocol mode numbering even when it accepts
 # the legacy X40 control frame. The physical unit confirmed this mapping:
-# wire 0=Cool, 1=Dry, 2=Auto, 3=Heat, 4=Fan.
+# Device calibration from the physical unit:
+# wire 0=Cool, 2=Auto, 3=Heat, 4=Dry, 5=Fan.
+# (wire 1 is not used for the five UI modes on this unit.)
 # Keep the website/SMS/schedule API on the normal logical numbering
 # 1=Auto, 2=Cool, 3=Dry, 4=Heat, 5=Fan.
-LOGICAL_TO_WIRE_MODE = {1: 2, 2: 0, 3: 1, 4: 3, 5: 4}
-WIRE_TO_LOGICAL_MODE = {wire: logical for logical, wire in LOGICAL_TO_WIRE_MODE.items()}
+LOGICAL_TO_WIRE_MODE = {1: 2, 2: 0, 3: 4, 4: 3, 5: 5}
+WIRE_TO_LOGICAL_MODE = {0: 2, 2: 1, 3: 4, 4: 3, 5: 5}
 
 
 class MideaClient:
