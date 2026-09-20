@@ -59,3 +59,4 @@ class DeviceCommand(BaseModel):
     temperature: float | None = Field(default=None, ge=50, le=90)
     mode: str | None = None
     fan: str | None = None
+    running: bool | None = None
