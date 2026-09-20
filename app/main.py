@@ -29,16 +29,18 @@ from .db import (
     list_activity,
     list_schedules,
     load_email_bridge_config,
+    load_google_voice_config,
     load_sms_config,
     save_device_state,
     save_email_bridge_config,
+    save_google_voice_config,
     save_sms_config,
     update_schedule,
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .messaging import process_text_command
-from .models import DeviceCommand, EmailBridgeConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
+from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
 
 BASE = Path(__file__).resolve().parent
@@ -203,6 +205,92 @@ def _email_bridge_config_with_secret() -> dict:
     return config
 
 
+def _google_voice_config_with_secret() -> dict:
+    config = load_google_voice_config()
+    secret = str(config.get("bridge_secret") or "")
+    if not secret:
+        secret = secrets.token_urlsafe(32)
+        config["bridge_secret"] = secret
+        save_google_voice_config(config)
+    return config
+
+
+def _google_voice_apps_script(base_url: str, secret: str, allowed_phone: str) -> str:
+    phone_digits = "".join(ch for ch in allowed_phone if ch.isdigit())[-10:]
+    endpoint = f"{base_url}/api/message/google-voice?token={secret}"
+    return f"""const NETHOME_ENDPOINT = {json.dumps(endpoint)};
+const ALLOWED_PHONE = {json.dumps(phone_digits)};
+
+function pollGoogleVoice() {{
+  const query = 'is:unread from:(@txt.voice.google.com) subject:"New text message from" newer_than:2d';
+  const threads = GmailApp.search(query, 0, 20);
+
+  threads.forEach(thread => {{
+    const messages = thread.getMessages();
+    messages.forEach(message => {{
+      if (!message.isUnread()) return;
+
+      const from = String(message.getFrom() || '').toLowerCase();
+      const subject = String(message.getSubject() || '');
+      if (!from.includes('@txt.voice.google.com')) return;
+
+      const subjectDigits = subject.replace(/\\D/g, '');
+      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) {{
+        message.markRead();
+        return;
+      }}
+
+      const command = extractVoiceCommand(message.getPlainBody());
+      if (!command) {{
+        message.markRead();
+        return;
+      }}
+
+      let replyText = 'NetHome command failed.';
+      try {{
+        const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
+          method: 'post',
+          contentType: 'application/json',
+          payload: JSON.stringify({{text: command, sender: ALLOWED_PHONE}}),
+          muteHttpExceptions: true
+        }});
+        const result = JSON.parse(response.getContentText() || '{{}}');
+        replyText = result.reply || result.detail || replyText;
+      }} catch (err) {{
+        replyText = 'NetHome error: ' + String(err).slice(0, 120);
+      }}
+
+      // Google Voice explicitly supports replying to the forwarded email.
+      message.reply(replyText);
+      message.markRead();
+    }});
+  }});
+}}
+
+function extractVoiceCommand(body) {{
+  const lines = String(body || '').replace(/\\r/g, '').split('\\n')
+    .map(s => s.trim()).filter(Boolean);
+  for (const line of lines) {{
+    if (/^to respond to this text message/i.test(line)) break;
+    if (/^(google voice|your account|help center|help forum|google llc)/i.test(line)) continue;
+    if (/^this email was sent to you/i.test(line)) continue;
+    if (/^1600 amphitheatre/i.test(line)) continue;
+    if (/^mountain view/i.test(line)) continue;
+    return line;
+  }}
+  return '';
+}}
+
+function installNetHomeTrigger() {{
+  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
+  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(1).create();
+  pollGoogleVoice();
+}}
+"""
+}
+
+
+
 def _extract_phone_digits_from_gateway(address: str) -> str:
     local = (address or "").split("@", 1)[0]
     return "".join(ch for ch in local if ch.isdigit())
@@ -311,6 +399,9 @@ def health():
         "email_bridge_configured": bool(
             load_email_bridge_config().get("postmark_server_token")
             and load_email_bridge_config().get("inbound_address")
+        ),
+        "google_voice_bridge_configured": bool(
+            load_google_voice_config().get("allowed_phone")
         ),
     }
 
@@ -470,6 +561,71 @@ def sms_config_update(body: SmsConfigUpdate, request: Request):
         "webhook_url": f"{base}/api/message/twilio?token={config['webhook_secret']}",
         "direct_sms_ready": True,
     }
+
+
+@app.get("/api/google-voice/config", dependencies=[Depends(access_auth)])
+def google_voice_config(request: Request):
+    config = _google_voice_config_with_secret()
+    base = str(request.base_url).rstrip("/")
+    allowed_phone = _normalize_phone(str(config.get("allowed_phone") or ""))
+    return {
+        "ok": True,
+        "allowed_phone": allowed_phone,
+        "ready": bool(allowed_phone),
+        "apps_script": _google_voice_apps_script(
+            base,
+            str(config["bridge_secret"]),
+            allowed_phone,
+        ),
+    }
+
+
+@app.post("/api/google-voice/config", dependencies=[Depends(access_auth)])
+def google_voice_config_update(body: GoogleVoiceConfigUpdate, request: Request):
+    config = _google_voice_config_with_secret()
+    allowed_phone = _normalize_phone(body.allowed_phone)
+    if len(allowed_phone) < 11:
+        raise HTTPException(status_code=400, detail="Enter a valid mobile number.")
+    config["allowed_phone"] = allowed_phone
+    if body.rotate_bridge_secret:
+        config["bridge_secret"] = secrets.token_urlsafe(32)
+    save_google_voice_config(config)
+    base = str(request.base_url).rstrip("/")
+    add_activity("google-voice-config", "updated", "success", "Google Voice bridge configured.")
+    return {
+        "ok": True,
+        "allowed_phone": allowed_phone,
+        "ready": True,
+        "apps_script": _google_voice_apps_script(
+            base,
+            str(config["bridge_secret"]),
+            allowed_phone,
+        ),
+    }
+
+
+@app.post("/api/message/google-voice")
+def google_voice_message(body: EmailTextRequest, request: Request):
+    config = load_google_voice_config()
+    expected = str(config.get("bridge_secret") or "")
+    supplied = request.query_params.get("token") or ""
+    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
+        raise HTTPException(status_code=403, detail="Invalid Google Voice bridge token")
+
+    allowed = _normalize_phone(str(config.get("allowed_phone") or ""))
+    sender = _normalize_phone(body.sender or "")
+    if allowed and sender and not hmac.compare_digest(allowed, sender):
+        add_activity("google-voice", "message", "rejected", f"from={sender[-4:]}")
+        raise HTTPException(status_code=403, detail="Unauthorized phone")
+
+    result = process_text_command(body.text)
+    add_activity(
+        "google-voice",
+        "message",
+        "success" if result.get("ok") else "error",
+        f"command={body.text[:80]}",
+    )
+    return result
 
 
 @app.get("/api/email-bridge/config", dependencies=[Depends(access_auth)])
