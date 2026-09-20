@@ -5,11 +5,13 @@ from typing import Any
 
 from .db import add_activity
 from .midea_client import midea
+from .weather import comfort_recommendation, forecast_summary
 
 
 HELP_TEXT = (
-    "Commands: STATUS, ON, OFF, COOL 72, HEAT 70, FAN AUTO. "
-    "AC write commands remain locked until live control is enabled."
+    "Try: status, weather today, weather tomorrow, what should I set it to, "
+    "set it based on the weather, turn it off, cool to 72, heat to 70. "
+    "AC changes remain locked until live control is enabled."
 )
 
 
@@ -28,6 +30,73 @@ def process_text_command(raw: str) -> dict[str, Any]:
         return {"ok": False, "reply": HELP_TEXT}
 
     add_activity("sms-email", "message_received", "received", command[:200])
+
+
+    natural = command.lower()
+
+    if "weather" in natural:
+        day = "tomorrow" if "tomorrow" in natural else "today"
+        try:
+            rec = comfort_recommendation(day)
+            f = rec["forecast"]
+            if any(word in natural for word in ["set", "should", "recommend", "based"]):
+                reply = (
+                    f"{day.title()}: high {f['high_f']}F, low {f['low_f']}F, "
+                    f"rain {f['rain_chance']}%. I recommend "
+                    f"{rec['recommended_mode']} {rec['recommended_temperature']}F."
+                )
+                if any(word in natural for word in ["set it", "set the ac", "do it", "based on"]):
+                    try:
+                        result = midea.command({
+                            "action": "set",
+                            "mode": rec["recommended_mode"],
+                            "temperature": rec["recommended_temperature"],
+                        })
+                        return {"ok": True, "reply": reply + " AC command confirmed.", "result": result}
+                    except Exception as exc:
+                        return {"ok": False, "reply": reply + " " + _short_error(exc)}
+                return {"ok": True, "reply": reply}
+            return {
+                "ok": True,
+                "reply": (
+                    f"{day.title()}: high {f['high_f']}F, low {f['low_f']}F, "
+                    f"rain chance {f['rain_chance']}%."
+                ),
+            }
+        except Exception as exc:
+            return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
+
+    if any(p in natural for p in ["what should i set", "what should the ac", "make it comfortable"]):
+        try:
+            rec = comfort_recommendation("today")
+            f = rec["forecast"]
+            return {
+                "ok": True,
+                "reply": (
+                    f"Today's forecast is {f['high_f']}F high / {f['low_f']}F low "
+                    f"with {f['rain_chance']}% rain chance. I recommend "
+                    f"{rec['recommended_mode']} {rec['recommended_temperature']}F."
+                ),
+            }
+        except Exception as exc:
+            return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
+
+    off_phrases = ["turn it off", "turn off", "shut it off", "switch it off"]
+    on_phrases = ["turn it on", "turn on", "switch it on"]
+    if any(p in natural for p in off_phrases):
+        command = "OFF"
+    elif any(p in natural for p in on_phrases):
+        command = "ON"
+    else:
+        temp_match = re.search(r"(cool|cooling|heat|heating).*?(\d{2})", natural)
+        if not temp_match:
+            temp_match = re.search(r"(\d{2}).*?(cool|cooling|heat|heating)", natural)
+            if temp_match:
+                temp_match = (temp_match.group(2), temp_match.group(1))
+        if temp_match and not isinstance(temp_match, tuple):
+            command = f"{'COOL' if temp_match.group(1).startswith('cool') else 'HEAT'} {temp_match.group(2)}"
+        elif isinstance(temp_match, tuple):
+            command = f"{'COOL' if temp_match[0].startswith('cool') else 'HEAT'} {temp_match[1]}"
 
     if command in {"HELP", "?", "COMMANDS"}:
         return {"ok": True, "reply": HELP_TEXT}
