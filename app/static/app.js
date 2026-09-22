@@ -1,5 +1,5 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
-let editingId=null;let schedulesCache=[];let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
+let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
 qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();}}));
 
@@ -17,8 +17,42 @@ function prettyDate(v){const d=parseDateOnly(v);return d?new Intl.DateTimeFormat
 function prettyTime(v){if(!v)return'';const [h,m]=v.split(':').map(Number);const period=h>=12?'PM':'AM';const hour=h%12||12;return `${hour}:${String(m).padStart(2,'0')} ${period}`;}
 function recurrenceText(s){const type=s.schedule_type||'weekly';if(type==='one_time')return prettyDate(s.start_date)||'Specific date';if(type==='weekdays')return 'Weekdays · Mon–Fri';if(type==='daily')return 'Every day';const days=(s.days||'').split(',').filter(Boolean).join(' · ');return `Weekly · ${days||'No days selected'}`;}
 function dateRangeText(s){if((s.schedule_type||'weekly')==='one_time')return'';if(s.start_date&&s.end_date)return `${prettyDate(s.start_date)} – ${prettyDate(s.end_date)}`;if(s.start_date)return `Starts ${prettyDate(s.start_date)}`;if(s.end_date)return `Through ${prettyDate(s.end_date)}`;return'';}
-function scheduleMarkup(s){const dateRange=dateRangeText(s);const command=[s.mode||'',s.temperature!=null?`${s.temperature}°F`:'',s.fan?`${s.fan} fan`:''].filter(Boolean).join(' · ');return `<div class="schedule-item" data-id="${s.id}"><div class="schedule-main"><div class="schedule-time">${esc(prettyTime(s.time_local))}</div><div class="schedule-copy"><div class="title">#${s.id} · ${esc(s.name)}</div><div class="sub">${esc(recurrenceText(s))}${dateRange?`<br>${esc(dateRange)}`:''}<br>${esc(command)}</div></div></div><div class="schedule-actions"><span class="tag ${s.enabled?'':'off'}">${s.enabled?'Enabled':'Disabled'}</span><button class="action-btn" data-action="edit">Edit</button><button class="action-btn" data-action="toggle">${s.enabled?'Disable':'Enable'}</button><button class="action-btn danger" data-action="delete">Delete</button></div></div>`;}
-async function loadSchedules(){const d=await jfetch('/api/schedules');schedulesCache=d.schedules;qs('#schedule-list').innerHTML=d.schedules.length?d.schedules.map(scheduleMarkup).join(''):'<div class="empty">No schedules yet. Create your first schedule above.</div>';}
+function scheduleMarkup(s){
+  const dateRange=dateRangeText(s);
+  const command=[s.mode||'',s.temperature!=null?`${s.temperature}°F`:'',s.fan?`${s.fan} fan`:''].filter(Boolean).join(' · ');
+  const checked=selectedScheduleIds.has(Number(s.id))?' checked':'';
+  return `<div class="schedule-item${checked?' selected':''}" data-id="${s.id}"><label class="schedule-select" title="Select schedule"><input type="checkbox" class="schedule-check" data-select-id="${s.id}"${checked}></label><div class="schedule-main"><div class="schedule-time">${esc(prettyTime(s.time_local))}</div><div class="schedule-copy"><div class="title">#${s.id} · ${esc(s.name)}</div><div class="sub">${esc(recurrenceText(s))}${dateRange?`<br>${esc(dateRange)}`:''}<br>${esc(command)}</div></div></div><div class="schedule-actions"><span class="tag ${s.enabled?'':'off'}">${s.enabled?'Enabled':'Disabled'}</span><button class="action-btn" data-action="edit">Edit</button><button class="action-btn" data-action="toggle">${s.enabled?'Disable':'Enable'}</button><button class="action-btn danger" data-action="delete">Delete</button></div></div>`;
+}
+function updateBulkScheduleUI(){
+  const count=selectedScheduleIds.size;
+  const bar=qs('#schedule-bulk-bar');
+  const countEl=qs('#schedule-selected-count');
+  if(bar)bar.classList.toggle('hidden',schedulesCache.length===0);
+  if(countEl)countEl.textContent=`${count} selected`;
+  const all=qs('#schedule-select-all');
+  if(all){all.checked=schedulesCache.length>0&&count===schedulesCache.length;all.indeterminate=count>0&&count<schedulesCache.length;}
+  ['#bulk-enable','#bulk-disable','#bulk-delete','#bulk-clear'].forEach(id=>{const el=qs(id);if(el)el.disabled=count===0;});
+  qsa('.schedule-item').forEach(item=>item.classList.toggle('selected',selectedScheduleIds.has(Number(item.dataset.id))));
+}
+async function loadSchedules(){
+  const d=await jfetch('/api/schedules');
+  schedulesCache=d.schedules;
+  const valid=new Set(d.schedules.map(s=>Number(s.id)));
+  selectedScheduleIds=new Set([...selectedScheduleIds].filter(id=>valid.has(id)));
+  qs('#schedule-list').innerHTML=d.schedules.length?d.schedules.map(scheduleMarkup).join(''):'<div class="empty">No schedules yet. Create your first schedule above.</div>';
+  updateBulkScheduleUI();
+}
+async function runBulkScheduleAction(action){
+  const ids=[...selectedScheduleIds];
+  if(!ids.length)return;
+  if(action==='delete'&&!confirm(`Delete ${ids.length} selected schedule${ids.length===1?'':'s'}? This cannot be undone.`))return;
+  try{
+    if(action==='delete'){for(const id of ids)await jfetch(`/api/schedules/${id}`,{method:'DELETE'});}
+    else{const enabled=action==='enable';for(const id of ids)await jfetch(`/api/schedules/${id}`,{method:'PATCH',body:JSON.stringify({enabled})});}
+    selectedScheduleIds.clear();
+    await loadSchedules();
+  }catch(err){alert(`Bulk action failed: ${err.message}`);await loadSchedules();}
+}
 async function loadActivity(){const d=await jfetch('/api/activity');qs('#activity-list').innerHTML=d.activity.length?d.activity.map(a=>`<div class="activity-item"><div><strong>${esc(a.action)}</strong><div class="sub">${esc(a.source)} · ${new Date(a.created_at).toLocaleString()}</div><div class="sub">${esc(a.details||'')}</div></div><code>${esc(a.result)}</code></div>`).join(''):'<div class="empty">No activity yet.</div>';}
 
 async function loadSmsConfig(){const state=qs('#sms-config-state');try{const d=await jfetch('/api/sms/config');const phone=qs('#sms-allowed-from'),url=qs('#sms-webhook-url');if(phone)phone.value=d.allowed_from||'';if(url)url.value=d.webhook_url||'';if(state){state.textContent=d.direct_sms_ready?'Ready for Twilio':'Save your mobile number';state.className=`setting-state ${d.direct_sms_ready?'ok-text':'warning'}`;}}catch(e){if(state){state.textContent='Unable to load SMS setup';state.className='setting-state warning';}}}
@@ -73,6 +107,12 @@ const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',sav
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
+qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
+const selectAll=qs('#schedule-select-all');if(selectAll)selectAll.addEventListener('change',()=>{selectedScheduleIds=selectAll.checked?new Set(schedulesCache.map(s=>Number(s.id))):new Set();qsa('.schedule-check').forEach(cb=>cb.checked=selectAll.checked);updateBulkScheduleUI();});
+const bulkDelete=qs('#bulk-delete');if(bulkDelete)bulkDelete.addEventListener('click',()=>runBulkScheduleAction('delete'));
+const bulkEnable=qs('#bulk-enable');if(bulkEnable)bulkEnable.addEventListener('click',()=>runBulkScheduleAction('enable'));
+const bulkDisable=qs('#bulk-disable');if(bulkDisable)bulkDisable.addEventListener('click',()=>runBulkScheduleAction('disable'));
+const bulkClear=qs('#bulk-clear');if(bulkClear)bulkClear.addEventListener('click',()=>{selectedScheduleIds.clear();qsa('.schedule-check').forEach(cb=>cb.checked=false);updateBulkScheduleUI();});
 qs('#schedule-list').addEventListener('click',async e=>{const btn=e.target.closest('[data-action]');if(!btn)return;const item=btn.closest('[data-id]');const id=Number(item.dataset.id);const s=schedulesCache.find(x=>x.id===id);if(!s)return;try{if(btn.dataset.action==='edit')editSchedule(s);if(btn.dataset.action==='toggle'){await jfetch(`/api/schedules/${id}`,{method:'PATCH',body:JSON.stringify({enabled:!s.enabled})});await loadSchedules();}if(btn.dataset.action==='delete'){if(confirm(`Delete schedule #${id} — ${s.name}?`)){await jfetch(`/api/schedules/${id}`,{method:'DELETE'});await loadSchedules();if(editingId===id)hideForm();}}}catch(err){alert(err.message);}});
 qs('#schedule-form').addEventListener('submit',async e=>{e.preventDefault();const p=formPayload();const error=validatePayload(p),box=qs('#schedule-error');if(error){box.textContent=error;box.classList.remove('hidden');return;}box.classList.add('hidden');const save=qs('#save-schedule');save.disabled=true;save.textContent='Saving…';try{if(editingId){await jfetch(`/api/schedules/${editingId}`,{method:'PATCH',body:JSON.stringify(p)});}else{await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(p)});}resetForm();hideForm();await loadSchedules();}catch(err){box.textContent=err.message;box.classList.remove('hidden');}finally{save.disabled=false;save.textContent='Save schedule';}});
 
