@@ -307,6 +307,7 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
     now = datetime.now(tz)
     parsed: list[dict[str, Any]] = []
     errors: list[str] = []
+    skipped_past: list[str] = []
 
     day_aliases = {
         "TODAY", "TOMORROW",
@@ -372,7 +373,7 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
             errors.append(f"{idx}: {run_date.isoformat()} is outside the next 7 days")
             continue
         if run_at <= now:
-            errors.append(f"{idx}: {day_text.upper()} {time_text.upper()} has already passed")
+            skipped_past.append(f"{day_text.upper()} {time_text.upper()}")
             continue
 
         parsed.append({
@@ -400,10 +401,17 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
         }
 
     if not parsed:
+        if skipped_past:
+            return {
+                "ok": False,
+                "reply": "No future entries were saved. All valid entries in that WEEK message have already passed."
+            }
         return {"ok": False, "reply": "No valid week schedule entries found."}
 
     created = [create_schedule(item) for item in parsed]
     lines = [f"Saved {len(created)} one-time schedules for the next 7 days:"]
+    if skipped_past:
+        lines.append(f"Skipped {len(skipped_past)} already-passed entr{'y' if len(skipped_past) == 1 else 'ies'}: " + ", ".join(skipped_past[:4]) + ("..." if len(skipped_past) > 4 else ""))
     for i, row in enumerate(created[:12], 1):
         date_text = str(row.get("start_date") or "")
         try:
