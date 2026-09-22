@@ -835,6 +835,70 @@ def process_text_command(raw: str) -> dict[str, Any]:
         except Exception as exc:
             return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
 
+    # Common conversational phrases work even when the optional AI fallback is not configured.
+    if any(p in natural for p in ["what's the ac status", "what is the ac status", "ac status", "what's the ac doing", "what is the ac doing"]):
+        command = "STATUS"
+
+    if any(p in natural for p in ["what's my schedule", "what is my schedule", "show my schedule", "show schedule"]):
+        command = "SCHEDULE"
+        schedule_result = _handle_schedule_command(command, raw_text)
+        if schedule_result is not None:
+            return schedule_result
+
+    if any(p in natural for p in ["a little colder", "a bit colder", "make it colder"]):
+        return {
+            "ok": True,
+            "reply": "Sure. Do you want me to lower the current temperature by 2F, or set a specific temperature?",
+        }
+    if any(p in natural for p in ["a little warmer", "a bit warmer", "make it warmer"]):
+        return {
+            "ok": True,
+            "reply": "Sure. Do you want me to raise the current temperature by 2F, or set a specific temperature?",
+        }
+
+    # A future time in a power request must never be mistaken for an immediate ON/OFF.
+    timed_power = re.search(
+        r"\b(?:turn|switch|shut)\b.*?\b(on|off)\b.*?\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
+        natural,
+    )
+    if timed_power:
+        action = timed_power.group(1).upper()
+        hour = timed_power.group(2)
+        minute = timed_power.group(3) or "00"
+        ampm = timed_power.group(4).upper()
+        day = None
+        if "tomorrow" in natural:
+            day = "TOMORROW"
+        elif "today" in natural or "tonight" in natural:
+            day = "TODAY"
+        if day:
+            scheduled = _handle_schedule_command(
+                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+            )
+            if scheduled is not None:
+                return scheduled
+        return {
+            "ok": True,
+            "reply": f"Do you mean {action.lower()} today at {hour}:{minute} {ampm}?",
+        }
+
+    fan_natural = re.search(r"\bfan\b.*?\b(auto|low|medium|high)\b", natural)
+    if fan_natural:
+        command = f"FAN {fan_natural.group(1).upper()}"
+
+    temp_natural = re.search(
+        r"\b(?:make|set)(?:\s+(?:it|the ac|temperature))?\s+(?:to\s+)?(\d{2}(?:\.\d)?)\s*(?:degrees?|f)?\b",
+        natural,
+    )
+    if temp_natural and not re.search(r"\b(?:cool|heat|heating|cooling)\b", natural):
+        command = f"TEMP {temp_natural.group(1)}"
+
+    mode_only = re.search(r"\b(?:put|set|switch)(?:\s+(?:it|the ac))?\s+(?:to|on)?\s*(cool|heat|dry|fan|auto)\b", natural)
+    if mode_only and not re.search(r"\d{2}", natural):
+        mode = mode_only.group(1)
+        return _execute({"action": "set", "mode": mode}, f"MODE {mode.upper()}")
+
     off_phrases = ["turn it off", "turn off", "shut it off", "switch it off"]
     on_phrases = ["turn it on", "turn on", "switch it on"]
     if any(p in natural for p in off_phrases):
