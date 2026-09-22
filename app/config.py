@@ -42,6 +42,8 @@ class Settings:
     account: str | None = os.getenv("NETHOME_ACCOUNT") or None
     password: str | None = os.getenv("NETHOME_PASSWORD") or None
     twilio_auth_token: str | None = os.getenv("TWILIO_AUTH_TOKEN") or None
+    openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
+    openai_model: str = os.getenv("NETHOME_OPENAI_MODEL", "gpt-5.6-luna")
 
 
 settings = Settings()
