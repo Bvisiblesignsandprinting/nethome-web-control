@@ -301,16 +301,11 @@ function pollGoogleVoice() {{
     ? 'subject:"New text message from ' + formattedPhone + '" newer_than:1d'
     : 'subject:"New text message from" newer_than:1d';
 
-  // Use the Gmail REST API instead of GmailApp so this bridge does not burn
-  // the Apps Script Gmail-service daily invocation quota. Only the newest two
-  // matching messages are inspected each run.
-  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=2');
+  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=10');
   const refs = found.messages || [];
   console.log('NetHome: found ' + refs.length + ' recent Google Voice messages');
 
-  let candidates = 0;
-  let sent = 0;
-
+  const pending = [];
   refs.forEach(ref => {{
     const metaKey = 'done_' + String(ref.id || '');
     if (!ref.id || props.getProperty(metaKey)) return;
@@ -319,7 +314,6 @@ function pollGoogleVoice() {{
     const headers = (msg.payload && msg.payload.headers) || [];
     const from = headerValue(headers, 'From').toLowerCase();
     const subject = headerValue(headers, 'Subject');
-    const rfcMessageId = headerValue(headers, 'Message-ID');
 
     if (!from.includes('@txt.voice.google.com')) return;
     if (!/^new text message from/i.test(subject)) return;
@@ -327,39 +321,99 @@ function pollGoogleVoice() {{
     const subjectDigits = subject.replace(/\\D/g, '');
     if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) return;
 
-    candidates++;
-    const command = extractVoiceCommand(messagePlainText(msg.payload));
-    console.log('NetHome: extracted command=' + command);
-    if (!command) return;
+    pending.push({{
+      id: ref.id,
+      metaKey: metaKey,
+      msg: msg,
+      headers: headers,
+      subject: subject,
+      command: extractVoiceCommand(messagePlainText(msg.payload)),
+      ts: Number(msg.internalDate || 0)
+    }});
+  }});
 
+  pending.sort((a, b) => a.ts - b.ts);
+  let sent = 0;
+
+  for (let i = 0; i < pending.length; i++) {{
+    const item = pending[i];
+    if (!item.command) continue;
+
+    if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\\s*:/i.test(item.command)) {{
+      const group = [item];
+      for (let j = i + 1; j < pending.length; j++) {{
+        const next = pending[j];
+        if (next.msg.threadId !== item.msg.threadId) break;
+        if (next.ts - item.ts > 180000) break;
+        group.push(next);
+      }}
+
+      const newestTs = Math.max.apply(null, group.map(x => x.ts || 0));
+      if (Date.now() - newestTs < 30000) {{
+        console.log('NetHome: waiting for remaining WEEK text pieces');
+        break;
+      }}
+
+      const combined = group.map(x => x.command).filter(Boolean).join(' ; ');
+      console.log('NetHome: combined WEEK command=' + combined.slice(0, 800));
+
+      try {{
+        const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
+          method: 'post',
+          contentType: 'application/json',
+          payload: JSON.stringify({{text: combined, sender: ALLOWED_PHONE}}),
+          muteHttpExceptions: true
+        }});
+        const code = response.getResponseCode();
+        const raw = response.getContentText() || '{{}}';
+        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
+        let result = {{}};
+        try {{ result = JSON.parse(raw); }} catch (_) {{}}
+        const replyText = result.reply || result.detail || 'NetHome command received.';
+
+        if (code >= 200 && code < 300) {{
+          const last = group[group.length - 1];
+          const rfcMessageId = headerValue(last.headers, 'Message-ID');
+          sendVoiceReply(headerValue(last.headers, 'From'), last.subject, replyText, last.msg.threadId, rfcMessageId);
+          group.forEach(x => props.setProperty(x.metaKey, new Date().toISOString()));
+          sent++;
+          console.log('NetHome: combined WEEK reply sent');
+          i += group.length - 1;
+        }}
+      }} catch (err) {{
+        console.log('NetHome bridge WEEK error: ' + err);
+      }}
+      continue;
+    }}
+
+    console.log('NetHome: extracted command=' + item.command);
     try {{
       const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
         method: 'post',
         contentType: 'application/json',
-        payload: JSON.stringify({{text: command, sender: ALLOWED_PHONE}}),
+        payload: JSON.stringify({{text: item.command, sender: ALLOWED_PHONE}}),
         muteHttpExceptions: true
       }});
-
       const code = response.getResponseCode();
       const raw = response.getContentText() || '{{}}';
       console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
-
       let result = {{}};
       try {{ result = JSON.parse(raw); }} catch (_) {{}}
       const replyText = result.reply || result.detail || 'NetHome command received.';
 
       if (code >= 200 && code < 300) {{
-        sendVoiceReply(headerValue(headers, 'From'), subject, replyText, msg.threadId, rfcMessageId);
+        const rfcMessageId = headerValue(item.headers, 'Message-ID');
+        sendVoiceReply(headerValue(item.headers, 'From'), item.subject, replyText, item.msg.threadId, rfcMessageId);
+        props.setProperty(item.metaKey, new Date().toISOString());
         sent++;
-        props.setProperty(metaKey, new Date().toISOString());
         console.log('NetHome: reply sent');
       }}
     }} catch (err) {{
       console.log('NetHome bridge error: ' + err);
     }}
-  }});
+  }}
 
-  console.log('NetHome: candidates=' + candidates + ' replies=' + sent);
+  console.log('NetHome: pending=' + pending.length + ' replies=' + sent);
 }}
 function extractVoiceCommand(body) {{
   const lines = String(body || '').replace(/\\r/g, '').split('\\n')
@@ -386,8 +440,10 @@ function extractVoiceCommand(body) {{
 
   if (!useful.length) return '';
 
-  // Week schedules intentionally span multiple SMS lines. Preserve all of them.
-  if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:/i.test(useful[0])) {{
+  // Preserve week schedules and split schedule fragments. Google Voice can
+  // deliver one long phone text as several Gmail notifications.
+  if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:/i.test(useful[0]) ||
+      /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{{2}}-\d{{2}}-\d{{2}})\s+/i.test(useful[0])) {{
     return useful.join(' ; ');
   }}
 
