@@ -170,9 +170,15 @@ def _schedule_command_text(schedule: dict[str, Any]) -> str:
     return " ".join(pieces) if pieces else "SET"
 
 
-def _schedule_list_reply() -> str:
+def _schedule_list_reply(days: int | None = None) -> str:
     entries = _schedule_entries()
+    if days is not None:
+        tz = ZoneInfo("America/New_York")
+        cutoff = datetime.now(tz) + timedelta(days=days)
+        entries = [(row, nxt) for row, nxt in entries if nxt is not None and nxt <= cutoff]
     if not entries:
+        if days is not None:
+            return f"📅 No upcoming schedules in the next {days} days."
         return (
             "📅 No schedules yet.\n\n"
             "Example:\n"
@@ -207,7 +213,8 @@ def _schedule_list_reply() -> str:
             parts.append(f"Fan {str(fan).title()}")
         return f"{mode_icon} " + " • ".join(parts or ["Set"])
 
-    lines = ["📅 Upcoming schedules", ""]
+    title = f"📅 Schedule • next {days} days" if days is not None else "📅 Upcoming schedules"
+    lines = [title, ""]
     for i, (row, nxt) in enumerate(entries[:8], 1):
         if nxt:
             when = nxt.strftime("%a %b %-d • %-I:%M %p")
@@ -855,6 +862,16 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "ok": True,
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
+
+    schedule_range = re.search(r"\b(?:schedule|schedules)\b.*?\bnext\s+(\d{1,2})\s+days?\b", natural)
+    if not schedule_range:
+        schedule_range = re.search(r"\bnext\s+(\d{1,2})\s+days?\b.*?\b(?:schedule|schedules)\b", natural)
+    if schedule_range:
+        days = max(1, min(30, int(schedule_range.group(1))))
+        return {"ok": True, "reply": _schedule_list_reply(days=days)}
+
+    if re.search(r"\b(?:list|show|give|tell)\b.*?\b(?:my\s+)?(?:schedule|schedules)\b", natural):
+        return {"ok": True, "reply": _schedule_list_reply()}
 
     schedule_result = _handle_schedule_command(command, raw_text)
     if schedule_result is not None:
