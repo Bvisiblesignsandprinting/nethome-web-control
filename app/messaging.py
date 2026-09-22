@@ -836,7 +836,7 @@ def process_text_command(raw: str) -> dict[str, Any]:
             return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
 
     # Common conversational phrases work even when the optional AI fallback is not configured.
-    if any(p in natural for p in ["what's the ac status", "what is the ac status", "ac status", "what's the ac doing", "what is the ac doing"]):
+    if any(p in natural for p in ["what's the ac status", "what is the ac status", "ac status", "what's the ac doing", "what is the ac doing"]) or re.fullmatch(r"(?:please\s+)?(?:check|show|tell me|give me)\s+(?:the\s+)?(?:ac\s+)?status(?:\s+please)?", natural):
         command = "STATUS"
 
     if any(p in natural for p in ["what's my schedule", "what is my schedule", "show my schedule", "show schedule"]):
