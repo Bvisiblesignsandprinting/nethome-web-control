@@ -20,25 +20,25 @@ from .db import (
 from .midea_client import midea
 from .weather import comfort_recommendation, current_weather, forecast_range, forecast_summary
 
-HELP_TEXT = """NetHome AC Control:
-Just text what you want in normal English.
+HELP_TEXT = """🏠 NetHome AC Control
 
-Examples:
-What's the AC status?
-Turn it on.
-Make it 72 degrees.
-Put it on cool.
-Make it a little colder.
-Set the fan to high.
-What's the weather tomorrow?
-What temperature do you recommend tonight?
-Turn the AC off at 11 PM.
-Set up my AC schedule for tomorrow.
-What's my schedule?
+Just text what you want.
 
-Short commands also work: STATUS, ON, OFF, COOL 72, HEAT 70, FAN AUTO.
+Try:
+• Check the AC status
+• Make it 72°
+• Cool to 74°
+• Fan high
+• Weather tomorrow?
+• Best temperature tonight?
+• Show my schedule
+• Show the next 10 days
+• Turn it off tomorrow at 11 PM
 
-If I'm not sure what you mean, I'll ask before changing the AC."""
+Shortcuts:
+STATUS • ON • OFF • COOL 72 • HEAT 70 • FAN AUTO
+
+If a change isn't clear, I'll ask before changing the AC."""
 
 
 def _short_error(exc: Exception) -> str:
@@ -55,24 +55,27 @@ def _short_error(exc: Exception) -> str:
 
 def _status_reply(result: dict[str, Any]) -> str:
     mode_names = {1: "Auto", 2: "Cool", 3: "Dry", 4: "Heat", 5: "Fan"}
+    mode_icons = {1: "🔄", 2: "❄️", 3: "💧", 4: "🔥", 5: "💨"}
     mode_code = result.get("mode")
 
     def _f(c):
         return None if c is None else round((float(c) * 9 / 5) + 32)
 
-    power = "ON" if result.get("running") else "OFF"
+    power = "🟢 On" if result.get("running") else "⚫ Off"
     mode = mode_names.get(mode_code, f"Mode {mode_code}")
+    icon = mode_icons.get(mode_code, "🌡️")
     target = _f(result.get("target_temperature_c"))
     indoor = _f(result.get("indoor_temperature_c"))
     fan = result.get("fan_speed")
-    parts = [power, mode]
+
+    lines = ["🌡️ AC Status", "", f"Power: {power}", f"Mode: {icon} {mode}"]
     if target is not None:
-        parts.append(f"{target}F")
+        lines.append(f"Set: {target}°F")
     if indoor is not None:
-        parts.append(f"Room {indoor}F")
+        lines.append(f"Room: {indoor}°F")
     if fan is not None:
-        parts.append(f"Fan {fan}%")
-    return " | ".join(parts)
+        lines.append(f"Fan: {fan}%")
+    return "\n".join(lines)
 
 
 def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
@@ -80,10 +83,14 @@ def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
         result = midea.command(payload)
         save_device_state(result, True, source="cloud")
         add_activity("sms", "device_command", "success", f"{label} verified={result.get('verified', False)}")
-        return {"ok": True, "reply": f"Done: {label}.", "result": result}
+        return {
+            "ok": True,
+            "reply": f"✅ Updated\n\n{_status_reply(result)}",
+            "result": result,
+        }
     except Exception as exc:
         add_activity("sms", "device_command", "error", f"{payload}: {exc}")
-        return {"ok": False, "reply": _short_error(exc)}
+        return {"ok": False, "reply": f"⚠️ {_short_error(exc)}"}
 
 
 
@@ -176,14 +183,11 @@ def _schedule_list_reply(days: int | None = None) -> str:
         tz = ZoneInfo("America/New_York")
         cutoff = datetime.now(tz) + timedelta(days=days)
         entries = [(row, nxt) for row, nxt in entries if nxt is not None and nxt <= cutoff]
+
     if not entries:
         if days is not None:
             return f"📅 No upcoming schedules in the next {days} days."
-        return (
-            "📅 No schedules yet.\n\n"
-            "Example:\n"
-            "ADD SCHEDULE DAILY 8:00 AM HEAT 68"
-        )
+        return "📅 No schedules yet.\n\nTry: ADD SCHEDULE DAILY 8:00 AM HEAT 68"
 
     def _display_action(row: dict[str, Any]) -> str:
         action = str(row.get("action") or "set").lower()
@@ -195,7 +199,6 @@ def _schedule_list_reply(days: int | None = None) -> str:
         mode = str(row.get("mode") or "").lower()
         temp = row.get("temperature")
         fan = row.get("fan")
-
         mode_icon = {
             "heat": "🔥",
             "cool": "❄️",
@@ -213,22 +216,34 @@ def _schedule_list_reply(days: int | None = None) -> str:
             parts.append(f"Fan {str(fan).title()}")
         return f"{mode_icon} " + " • ".join(parts or ["Set"])
 
-    title = f"📅 Schedule • next {days} days" if days is not None else "📅 Upcoming schedules"
-    lines = [title, ""]
-    for i, (row, nxt) in enumerate(entries[:8], 1):
-        if nxt:
-            when = nxt.strftime("%a %b %-d • %-I:%M %p")
-        else:
-            when = "No upcoming run"
+    title = f"📅 Next {days} days" if days is not None else "📅 Upcoming schedule"
+    lines = [title]
+    limit = 20 if days is not None else 10
+    visible = entries[:limit]
+    last_day = None
 
+    for i, (row, nxt) in enumerate(visible, 1):
         disabled = not row.get("enabled")
-        status = " ⏸️ Disabled" if disabled else ""
-        lines.append(f"{i}. {when}{status}")
-        lines.append(f"   {_display_action(row)}")
-        lines.append("")
+        if nxt:
+            day_key = nxt.date()
+            if day_key != last_day:
+                lines.append("")
+                lines.append(nxt.strftime("%a • %b %-d"))
+                last_day = day_key
+            status = " • ⏸️ Disabled" if disabled else ""
+            lines.append(f"{i}. {nxt.strftime('%-I:%M %p')} • {_display_action(row)}{status}")
+        else:
+            if last_day != "disabled":
+                lines.extend(["", "⏸️ Disabled"])
+                last_day = "disabled"
+            lines.append(f"{i}. {_display_action(row)}")
+
+    if len(entries) > limit:
+        lines.extend(["", f"…and {len(entries) - limit} more."])
 
     lines.extend([
-        "✏️ To change one:",
+        "",
+        "✏️ Change one by number:",
         "SCHEDULE 1 HEAT 68",
         "SCHEDULE 1 TIME 8:30 PM",
         "SCHEDULE 1 OFF",
@@ -624,9 +639,10 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
             return {
                 "ok": True,
                 "reply": (
-                    f"Now {cur['temperature_f']}F, feels {cur['feels_like_f']}F, "
-                    f"wind {cur['wind_mph']} mph. Today high {today['high_f']}F, "
-                    f"low {today['low_f']}F, rain {today['rain_chance']}%."
+                    f"🌤️ Weather now\n\n"
+                    f"{cur['temperature_f']}°F • Feels {cur['feels_like_f']}°F\n"
+                    f"💨 Wind {cur['wind_mph']} mph\n"
+                    f"Today: {today['high_f']}° / {today['low_f']}° • 🌧️ {today['rain_chance']}%"
                 ),
             }
 
@@ -634,7 +650,7 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
             count = 7
             forecasts = forecast_range(count)
             lines = [
-                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}/{f['low_f']}F rain {f['rain_chance']}%"
+                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}° / {f['low_f']}° • 🌧️ {f['rain_chance']}%"
                 for f in forecasts
             ]
             return {"ok": True, "reply": "7-day forecast:\n" + "\n".join(lines)}
@@ -644,7 +660,7 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
             count = int(days_match.group(1))
             forecasts = forecast_range(count)
             lines = [
-                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}/{f['low_f']}F rain {f['rain_chance']}%"
+                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}° / {f['low_f']}° • 🌧️ {f['rain_chance']}%"
                 for f in forecasts
             ]
             return {"ok": True, "reply": f"{count}-day forecast:\n" + "\n".join(lines)}
@@ -661,9 +677,11 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
         rec = comfort_recommendation(day)
         f = rec["forecast"]
         label = datetime.fromisoformat(f["date"]).strftime("%a %b %-d")
-        reply = f"{label}: high {f['high_f']}F, low {f['low_f']}F, rain {f['rain_chance']}%."
+        reply = f"🌤️ {label}\n\nHigh {f['high_f']}° • Low {f['low_f']}°\n🌧️ Rain {f['rain_chance']}%"
         if any(word in natural for word in ["recommend", "should", "set", "based"]):
-            reply += f" Recommend {str(rec['recommended_mode']).upper()} {rec['recommended_temperature']}F."
+            mode = str(rec['recommended_mode']).title()
+            icon = "🔥" if mode.lower() == "heat" else "❄️" if mode.lower() == "cool" else "🌡️"
+            reply += f"\n💡 Suggested: {icon} {mode} {rec['recommended_temperature']}°F"
         if any(p in natural for p in ["set it", "set the ac", "do it", "based on"]):
             payload = {
                 "action": "set",
@@ -695,7 +713,7 @@ def _ai_interpret(raw_text: str) -> dict[str, Any] | None:
         "type": "object",
         "properties": {
             "kind": {"type": "string", "enum": ["command", "clarify", "answer"]},
-            "command": {"type": ["string", "null"]},
+            "command": {"type": "string"},
             "reply": {"type": "string"},
         },
         "required": ["kind", "command", "reply"],
@@ -728,6 +746,7 @@ WEATHER <2-8> DAYS
 WEATHER WEEK
 WEATHER TOMORROW RECOMMEND
 SCHEDULE
+SCHEDULE NEXT <1-30> DAYS
 SCHEDULE <number>
 SCHEDULE <number> HEAT <50-90>
 SCHEDULE <number> COOL <50-90>
@@ -751,6 +770,7 @@ Examples:
 "what should I set it to tomorrow" -> WEATHER TOMORROW RECOMMEND
 "turn it off tomorrow at 11 pm" -> WEEK: TOMORROW 11:00 PM OFF
 "what's my schedule" -> SCHEDULE
+"show me about ten days of schedules" -> SCHEDULE NEXT 10 DAYS
 "set schedule 2 to heat 69" -> SCHEDULE 2 HEAT 69
 """
 
@@ -811,6 +831,7 @@ def _safe_ai_command(command: str) -> bool:
         r"WEATHER(?:\s+(?:NOW|TODAY|TOMORROW|MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|WEEK))?(?:\s+RECOMMEND)?",
         r"WEATHER\s+[2-8]\s+DAYS?",
         r"SCHEDULES?",
+        r"SCHEDULE\s+NEXT\s+(?:[1-9]|[12]\d|30)\s+DAYS?",
         r"SCHEDULE\s+\d+(?:\s+(?:HEAT\s+\d{2}(?:\.\d)?|COOL\s+\d{2}(?:\.\d)?|OFF|ON|TIME\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)|FAN\s+(?:AUTO|LOW|MEDIUM|HIGH)|ENABLE|DISABLE|DELETE))?",
         r"ADD\s+SCHEDULE\s+(?:DAILY|WEEKDAYS|(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:,(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s+(?:(?:HEAT|COOL)\s+\d{2}(?:\.\d)?|ON|OFF)",
         r"(?:WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:\s+.+",
@@ -863,6 +884,15 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
 
+    if command == "AI STATUS":
+        state = "On" if settings.openai_api_key else "Off"
+        return {"ok": True, "reply": f"🤖 AI: {state}\nModel: {settings.openai_model}"}
+
+    canonical_range = re.fullmatch(r"SCHEDULE\s+NEXT\s+(\d{1,2})\s+DAYS?", command)
+    if canonical_range:
+        days = max(1, min(30, int(canonical_range.group(1))))
+        return {"ok": True, "reply": _schedule_list_reply(days=days)}
+
     schedule_range = re.search(r"\b(?:schedule|schedules)\b.*?\bnext\s+(\d{1,2})\s+days?\b", natural)
     if not schedule_range:
         schedule_range = re.search(r"\bnext\s+(\d{1,2})\s+days?\b.*?\b(?:schedule|schedules)\b", natural)
@@ -908,12 +938,12 @@ def process_text_command(raw: str) -> dict[str, Any]:
     if any(p in natural for p in ["a little colder", "a bit colder", "make it colder"]):
         return {
             "ok": True,
-            "reply": "Sure. Do you want me to lower the current temperature by 2F, or set a specific temperature?",
+            "reply": "🤔 How much colder?\n\nYou can say:\n• 2 degrees colder\n• Set it to 72°",
         }
     if any(p in natural for p in ["a little warmer", "a bit warmer", "make it warmer"]):
         return {
             "ok": True,
-            "reply": "Sure. Do you want me to raise the current temperature by 2F, or set a specific temperature?",
+            "reply": "🤔 How much warmer?\n\nYou can say:\n• 2 degrees warmer\n• Set it to 72°",
         }
 
     # A future time in a power request must never be mistaken for an immediate ON/OFF.
@@ -1021,4 +1051,7 @@ def process_text_command(raw: str) -> dict[str, Any]:
     if ai_result is not None:
         return ai_result
 
-    return {"ok": False, "reply": "I didn't understand that. Text HELP for examples, or say what you want in a different way."}
+    return {
+        "ok": False,
+        "reply": "🤔 I didn't catch that.\n\nTry saying it naturally, like:\n• Check status\n• Make it 72°\n• Show next 10 days\n\nOr text HELP.",
+    }
