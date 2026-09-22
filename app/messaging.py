@@ -718,6 +718,8 @@ The authorized owner is texting their own HVAC controller. Keep replies short en
 {state_text}
 
 Return a command only when the user's intent is clear. Never guess a temperature, time, date, mode, or schedule.
+CRITICAL SAFETY RULE: if the user mentions a future time, day, "schedule", "later", "until", "today", "tomorrow", or "tonight", NEVER translate that into immediate ON or OFF. Use a schedule command, or clarify if the day/time is incomplete.
+If the user says "keep/stay on until <time>", that means schedule OFF at that time; do not turn it off now.
 If a request could cause an HVAC change and an important detail is ambiguous, use kind=clarify and ask one short question.
 For harmless informational questions, you may map them to an existing command.
 For unrelated general questions, use kind=answer and briefly say this SMS assistant is for AC, schedules, and weather.
@@ -762,6 +764,8 @@ Examples:
 "weather tomorrow" -> WEATHER TOMORROW
 "what should I set it to tomorrow" -> WEATHER TOMORROW RECOMMEND
 "turn it off tomorrow at 11 pm" -> WEEK: TOMORROW 11:00 PM OFF
+"add to the schedule it should turn off 4:00 p.m. today" -> WEEK: TODAY 4:00 PM OFF
+"keep it on until 4:00 p.m. today" -> WEEK: TODAY 4:00 PM OFF
 "what's my schedule" -> SCHEDULE
 "show me about ten days of schedules" -> SCHEDULE NEXT 10 DAYS
 "set schedule 2 to heat 69" -> SCHEDULE 2 HEAT 69
@@ -855,7 +859,8 @@ def _ai_fallback(raw_text: str) -> dict[str, Any] | None:
 
 def process_text_command(raw: str) -> dict[str, Any]:
     raw_text = (raw or "").strip()
-    command = " ".join(raw_text.upper().split())
+    normalized_raw = re.sub(r"\b([ap])\s*\.?\s*m\.?\b", r"\1m", raw_text, flags=re.I)
+    command = " ".join(normalized_raw.upper().split())
     if not command:
         return {"ok": False, "reply": HELP_TEXT}
 
@@ -939,32 +944,60 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "reply": "🤔 How much warmer?\nYou can say:\n• 2 degrees warmer\n• Set it to 72°",
         }
 
-    # A future time in a power request must never be mistaken for an immediate ON/OFF.
-    timed_power = re.search(
-        r"\b(?:turn|switch|shut)\b.*?\b(on|off)\b.*?\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
-        natural,
-    )
-    if timed_power:
-        action = timed_power.group(1).upper()
-        hour = timed_power.group(2)
-        minute = timed_power.group(3) or "00"
-        ampm = timed_power.group(4).upper()
-        day = None
-        if "tomorrow" in natural:
-            day = "TOMORROW"
-        elif "today" in natural or "tonight" in natural:
-            day = "TODAY"
-        if day:
-            scheduled = _handle_schedule_command(
-                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
-                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
-            )
-            if scheduled is not None:
-                return scheduled
+    # SAFETY: anything that looks scheduled/future must never fall through to immediate ON/OFF.
+    power_action = re.search(r"\b(?:turn|switch|shut)(?:\s+(?:it|the ac))?\s+(on|off)\b", natural)
+    time_match = re.search(r"\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", natural)
+    future_words = any(word in natural for word in [
+        "schedule", "scheduled", "later", "today", "tomorrow", "tonight", "until", "at "
+    ])
+
+    if power_action and (time_match or future_words):
+        action = power_action.group(1).upper()
+
+        if time_match:
+            hour = time_match.group(1)
+            minute = time_match.group(2) or "00"
+            ampm = time_match.group(3).upper()
+            day = None
+            if "tomorrow" in natural:
+                day = "TOMORROW"
+            elif "today" in natural or "tonight" in natural:
+                day = "TODAY"
+
+            if day:
+                scheduled = _handle_schedule_command(
+                    f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+                    f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+                )
+                if scheduled is not None:
+                    return scheduled
+
+            return {
+                "ok": True,
+                "reply": f"🕒 I won't change the AC right now. Do you mean {action.lower()} today at {hour}:{minute} {ampm}?",
+            }
+
         return {
             "ok": True,
-            "reply": f"Do you mean {action.lower()} today at {hour}:{minute} {ampm}?",
+            "reply": "🕒 I understood this as a scheduled change, so I did not change the AC now. What day and time should I use?",
         }
+
+    # "Keep/stay on until 4 PM" means schedule OFF at that time, not OFF now.
+    stay_on_until = re.search(
+        r"\b(?:stay|keep)(?:\s+(?:it|the ac))?\s+on\s+until\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
+        natural,
+    )
+    if stay_on_until:
+        hour = stay_on_until.group(1)
+        minute = stay_on_until.group(2) or "00"
+        ampm = stay_on_until.group(3).upper()
+        day = "TOMORROW" if "tomorrow" in natural else "TODAY"
+        scheduled = _handle_schedule_command(
+            f"WEEK: {day} {hour}:{minute} {ampm} OFF",
+            f"WEEK: {day} {hour}:{minute} {ampm} OFF",
+        )
+        if scheduled is not None:
+            return scheduled
 
     fan_natural = re.search(r"\bfan\b.*?\b(auto|low|medium|high)\b", natural)
     if fan_natural:
