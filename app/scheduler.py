@@ -86,13 +86,12 @@ def _schedule_due_at(schedule: dict[str, Any], now_utc: datetime) -> datetime | 
 def _command_from_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
     action = str(schedule.get("action") or "set").lower()
     command: dict[str, Any] = {"action": action}
-    if action == "set":
-        if schedule.get("mode"):
-            command["mode"] = str(schedule["mode"])
-        if schedule.get("temperature") is not None:
-            command["temperature"] = float(schedule["temperature"])
-        if schedule.get("fan"):
-            command["fan"] = str(schedule["fan"])
+    if schedule.get("mode"):
+        command["mode"] = str(schedule["mode"])
+    if schedule.get("temperature") is not None:
+        command["temperature"] = float(schedule["temperature"])
+    if schedule.get("fan"):
+        command["fan"] = str(schedule["fan"])
     return command
 
 

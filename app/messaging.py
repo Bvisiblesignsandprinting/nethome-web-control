@@ -857,6 +857,108 @@ def _ai_fallback(raw_text: str) -> dict[str, Any] | None:
     return None
 
 
+
+def _handle_natural_one_time_schedule(raw_text: str) -> dict[str, Any] | None:
+    """Handle plain-English one-time schedule requests before immediate-command parsing."""
+    natural = raw_text.lower()
+    if not any(word in natural for word in ["schedule", "today", "tomorrow", "tonight", "later", " at "]):
+        return None
+
+    action_match = re.search(
+        r"\b(?:turn|switch|start|power|shut|stop)(?:\s+(?:it|the ac))?\s+(on|off)\b",
+        natural,
+    )
+    if not action_match:
+        if re.search(r"\b(?:start|turn)\b", natural) and re.search(r"\bon\b", natural):
+            action = "ON"
+        elif re.search(r"\b(?:stop|shut|turn)\b", natural) and re.search(r"\boff\b", natural):
+            action = "OFF"
+        else:
+            return None
+    else:
+        action = action_match.group(1).upper()
+
+    time_match = re.search(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", natural)
+    if not time_match:
+        return {
+            "ok": True,
+            "reply": "🕒 I understood this as a schedule request, but I need a time like 4:20 PM.",
+        }
+
+    hour = int(time_match.group(1))
+    minute = int(time_match.group(2) or 0)
+    ampm = time_match.group(3).upper()
+    if hour < 1 or hour > 12 or minute > 59:
+        return {"ok": False, "reply": "⚠️ That time does not look valid."}
+    hour24 = hour % 12 + (12 if ampm == "PM" else 0)
+
+    tz = ZoneInfo("America/New_York")
+    now = datetime.now(tz)
+    run_date = None
+
+    mdY = re.search(r"\b(\d{1,2})/(\d{1,2})/(\d{4})\b", natural)
+    iso = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", natural)
+    try:
+        if mdY:
+            month, day, year = [int(x) for x in mdY.groups()]
+            run_date = datetime(year, month, day, tzinfo=tz).date()
+        elif iso:
+            run_date = datetime.fromisoformat(iso.group(1)).date()
+        elif "tomorrow" in natural:
+            run_date = now.date() + timedelta(days=1)
+        elif any(word in natural for word in ["today", "tonight"]):
+            run_date = now.date()
+    except ValueError:
+        return {"ok": False, "reply": "⚠️ I couldn't read that date."}
+
+    if run_date is None:
+        return {
+            "ok": True,
+            "reply": f"🕒 I won't change the AC now. What day should I schedule {action.lower()} at {hour}:{minute:02d} {ampm}?",
+        }
+
+    run_at = datetime(run_date.year, run_date.month, run_date.day, hour24, minute, tzinfo=tz)
+    if run_at <= now:
+        return {
+            "ok": False,
+            "reply": f"⏰ {run_at.strftime('%-I:%M %p')} on {run_at.strftime('%b %-d')} has already passed. Nothing was changed.",
+        }
+
+    fan = None
+    fan_match = re.search(r"\bfan(?:\s+(?:at|to|of))?\s*(\d{1,3})\s*%?\b", natural)
+    if fan_match:
+        fan_value = int(fan_match.group(1))
+        if fan_value < 0 or fan_value > 100:
+            return {"ok": False, "reply": "⚠️ Fan must be between 0% and 100%."}
+        fan = str(fan_value)
+
+    payload = {
+        "name": f"SMS one-time {run_date.isoformat()} {hour}:{minute:02d} {ampm}",
+        "schedule_type": "one_time",
+        "days": "",
+        "start_date": run_date.isoformat(),
+        "end_date": run_date.isoformat(),
+        "time_local": f"{hour24:02d}:{minute:02d}",
+        "action": action.lower(),
+        "mode": None,
+        "temperature": None,
+        "fan": fan,
+        "enabled": True,
+    }
+    created = create_schedule(payload)
+
+    fan_text = f" • Fan {fan}%" if fan is not None else ""
+    return {
+        "ok": True,
+        "reply": (
+            f"✅ Scheduled\n"
+            f"{run_at.strftime('%a • %b %-d • %-I:%M %p')}\n"
+            f"{'▶️ On' if action == 'ON' else '⏹️ Off'}{fan_text}"
+        ),
+        "schedule": created,
+    }
+
+
 def process_text_command(raw: str) -> dict[str, Any]:
     raw_text = (raw or "").strip()
     normalized_raw = re.sub(r"\b([ap])\s*\.?\s*m\.?\b", r"\1m", raw_text, flags=re.I)
@@ -881,6 +983,10 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "ok": True,
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
+
+    natural_schedule = _handle_natural_one_time_schedule(normalized_raw)
+    if natural_schedule is not None:
+        return natural_schedule
 
     if command == "AI STATUS":
         state = "On" if settings.openai_api_key else "Off"
