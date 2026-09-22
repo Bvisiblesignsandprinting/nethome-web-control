@@ -222,19 +222,23 @@ def _google_voice_apps_script(base_url: str, secret: str, allowed_phone: str) ->
 const ALLOWED_PHONE = {json.dumps(phone_digits)};
 
 function pollGoogleVoice() {{
-  const labelName = 'NetHomeProcessed';
-  const label = GmailApp.getUserLabelByName(labelName) || GmailApp.createLabel(labelName);
-  const query = 'from:txt.voice.google.com subject:"New text message from" newer_than:2d -label:' + labelName;
-  const threads = GmailApp.search(query, 0, 20);
+  const props = PropertiesService.getScriptProperties();
+  const query = 'subject:"New text message from" newer_than:2d';
+  const threads = GmailApp.search(query, 0, 30);
 
   threads.forEach(thread => {{
     const messages = thread.getMessages();
-    let processed = false;
 
     messages.forEach(message => {{
+      const messageId = String(message.getId() || '');
+      if (messageId && props.getProperty('done_' + messageId)) return;
+
       const from = String(message.getFrom() || '').toLowerCase();
       const subject = String(message.getSubject() || '');
+
+      // Only accept actual Google Voice forwarded text notifications.
       if (!from.includes('@txt.voice.google.com')) return;
+      if (!/^new text message from/i.test(subject)) return;
 
       const subjectDigits = subject.replace(/\\D/g, '');
       if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) return;
@@ -243,6 +247,8 @@ function pollGoogleVoice() {{
       if (!command) return;
 
       let replyText = 'NetHome command failed.';
+      let processedOk = false;
+
       try {{
         const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
           method: 'post',
@@ -250,23 +256,28 @@ function pollGoogleVoice() {{
           payload: JSON.stringify({{text: command, sender: ALLOWED_PHONE}}),
           muteHttpExceptions: true
         }});
+
+        const code = response.getResponseCode();
         const result = JSON.parse(response.getContentText() || '{{}}');
         replyText = result.reply || result.detail || replyText;
+
+        if (code >= 200 && code < 300) {{
+          message.reply(replyText);
+          processedOk = true;
+        }} else {{
+          console.log('NetHome HTTP ' + code + ': ' + response.getContentText());
+        }}
       }} catch (err) {{
-        replyText = 'NetHome error: ' + String(err).slice(0, 120);
+        console.log('NetHome bridge error: ' + err);
       }}
 
-      message.reply(replyText);
-      processed = true;
+      if (processedOk && messageId) {{
+        props.setProperty('done_' + messageId, new Date().toISOString());
+        message.markRead();
+      }}
     }});
-
-    if (processed) {{
-      thread.addLabel(label);
-      thread.markRead();
-    }}
   }});
 }}
-
 function extractVoiceCommand(body) {{
   const lines = String(body || '').replace(/\\r/g, '').split('\\n')
     .map(s => s.trim()).filter(Boolean);
