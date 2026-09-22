@@ -309,37 +309,56 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
     errors: list[str] = []
 
     entry_re = re.compile(
-        r"^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{2}-\d{2}-\d{2})\s+"
-        r"(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$",
+        r"^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{2}-\\d{2}-\\d{2})"
+        r"\\s*[:,-]?\\s+"
+        r"(\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM))"
+        r"\\s*(?:-|:|@)?\\s+(.+)$",
+        re.I,
+    )
+    time_only_re = re.compile(
+        r"^(\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM))\\s*(?:-|:|@)?\\s+(.+)$",
         re.I,
     )
 
-    for idx, part in enumerate(parts, 1):
-        match = entry_re.fullmatch(part)
-        if not match:
-            errors.append(f"{idx}: use DAY TIME ACTION")
-            continue
+    last_day_text: str | None = None
+    for idx, raw_part in enumerate(parts, 1):
+        part = re.sub(r"^\\s*(?:[-*•]+|\\d+[.)])\\s*", "", raw_part).strip()
 
-        run_date = _resolve_week_date(match.group(1), tz)
-        time_local = _parse_sms_time(match.group(2))
-        action = _parse_schedule_action(match.group(3))
+        match = entry_re.fullmatch(part)
+        if match:
+            day_text = match.group(1)
+            time_text = match.group(2)
+            action_text = match.group(3)
+            last_day_text = day_text
+        else:
+            time_match = time_only_re.fullmatch(part)
+            if time_match and last_day_text:
+                day_text = last_day_text
+                time_text = time_match.group(1)
+                action_text = time_match.group(2)
+            else:
+                errors.append(f"{idx}: couldn't read '{part[:45]}'")
+                continue
+
+        run_date = _resolve_week_date(day_text, tz)
+        time_local = _parse_sms_time(time_text)
+        action = _parse_schedule_action(action_text)
         if not run_date or not time_local or not action:
-            errors.append(f"{idx}: invalid date/time/action")
+            errors.append(f"{idx}: invalid date/time/action in '{part[:45]}'")
             continue
 
         hh, mm = [int(x) for x in time_local.split(":")]
         run_at = datetime(run_date.year, run_date.month, run_date.day, hh, mm, tzinfo=tz)
 
-        # WEEK means the next 7 calendar days, including today.
         if run_date < now.date() or run_date > now.date() + timedelta(days=6):
             errors.append(f"{idx}: {run_date.isoformat()} is outside the next 7 days")
             continue
         if run_at <= now:
-            errors.append(f"{idx}: {match.group(1).upper()} {match.group(2).upper()} has already passed")
+            errors.append(f"{idx}: {day_text.upper()} {time_text.upper()} has already passed")
             continue
 
         parsed.append({
-            "name": f"SMS week {run_date.isoformat()} {match.group(2).upper()}",
+            "name": f"SMS week {run_date.isoformat()} {time_text.upper()}",
             "schedule_type": "one_time",
             "days": "",
             "start_date": run_date.isoformat(),
@@ -355,7 +374,11 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
     if errors:
         return {
             "ok": False,
-            "reply": "Week schedule not saved because some entries need fixing:\n" + "\n".join(errors[:8]),
+            "reply": (
+                "Week schedule not saved because some entries need fixing:\\n"
+                + "\\n".join(errors[:8])
+                + "\\nFix only those lines and resend the same schedule."
+            ),
         }
 
     if not parsed:
