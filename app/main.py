@@ -293,14 +293,32 @@ function pollGoogleVoice() {{
 function extractVoiceCommand(body) {{
   const lines = String(body || '').replace(/\\r/g, '').split('\\n')
     .map(s => s.trim()).filter(Boolean);
+
+  const isBoilerplate = (line) => {{
+    if (/^<https?:\\/\\/[^>]+>$/.test(line)) return true;
+    if (/^https?:\\/\\//i.test(line)) return true;
+    if (/^to respond to this text message/i.test(line)) return true;
+    if (/^(google voice|your account|help center|help forum|google llc)/i.test(line)) return true;
+    if (/^this email was sent to you/i.test(line)) return true;
+    if (/^1600 amphitheatre/i.test(line)) return true;
+    if (/^mountain view/i.test(line)) return true;
+    if (/^new text message from/i.test(line)) return true;
+    return false;
+  }};
+
+  // Prefer a line that clearly looks like one of our AC commands.
+  const commandPattern = /^(STATUS|ON|OFF|HELP|START|YES|STOP|WEATHER|MODE|TEMP(?:ERATURE)?\\s+\\d+(?:\\.\\d+)?|SET\\s+\\d+(?:\\.\\d+)?|COOL\\s+\\d+(?:\\.\\d+)?|HEAT\\s+\\d+(?:\\.\\d+)?|FAN(?:\\s+(?:AUTO|LOW|MEDIUM|HIGH))?)$/i;
   for (const line of lines) {{
-    if (/^to respond to this text message/i.test(line)) break;
-    if (/^(google voice|your account|help center|help forum|google llc)/i.test(line)) continue;
-    if (/^this email was sent to you/i.test(line)) continue;
-    if (/^1600 amphitheatre/i.test(line)) continue;
-    if (/^mountain view/i.test(line)) continue;
+    if (isBoilerplate(line)) continue;
+    if (commandPattern.test(line)) return line;
+  }}
+
+  // Fallback for supported natural-language commands.
+  for (const line of lines) {{
+    if (isBoilerplate(line)) continue;
     return line;
   }}
+
   return '';
 }}
 
