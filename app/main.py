@@ -269,16 +269,20 @@ function sendVoiceReply(to, subject, body, threadId, messageId) {{
   const profile = gmailApi('profile');
   const from = String(profile.emailAddress || '');
   const cleanSubject = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
-  const mime = [
+  const headers = [
     'From: ' + from,
     'To: ' + to,
     'Subject: ' + cleanSubject,
     messageId ? 'In-Reply-To: ' + messageId : '',
     messageId ? 'References: ' + messageId : '',
+    'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
-    '',
-    body
-  ].filter(Boolean).join('\\r\\n');
+    'Content-Transfer-Encoding: 8bit'
+  ].filter(Boolean);
+
+  // Keep the required blank line between RFC 5322 headers and the body.
+  // Do not filter the separator out, or Gmail accepts a message with an empty body.
+  const mime = headers.join('\\r\\n') + '\\r\\n\\r\\n' + String(body || '');
 
   gmailApi('messages/send', {{
     method: 'post',
