@@ -386,9 +386,19 @@ function extractVoiceCommand(body) {{
 
   if (!useful.length) return '';
 
-  // Preserve multi-line week schedules by joining the SMS lines with semicolons.
-  // Single-line commands remain unchanged.
-  return useful.join(' ; ');
+  // Week schedules intentionally span multiple SMS lines. Preserve all of them.
+  if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:/i.test(useful[0])) {{
+    return useful.join(' ; ');
+  }}
+
+  // For normal commands, use only the actual command line. Google Voice emails
+  // can contain extra footer/thread text that must not become part of the command.
+  const commandPattern = /^(STATUS|ON|OFF|HELP|START|YES|STOP|SCHEDULES?|MODE|WEATHER(?:\s+.*)?|TEMP(?:ERATURE)?\s+\d+(?:\.\d+)?|SET\s+\d+(?:\.\d+)?|COOL\s+\d+(?:\.\d+)?|HEAT\s+\d+(?:\.\d+)?|FAN(?:\s+(?:AUTO|LOW|MEDIUM|HIGH))?|ADD SCHEDULE\s+.*)$/i;
+  for (const line of useful) {{
+    if (commandPattern.test(line)) return line;
+  }}
+
+  return useful[0];
 }}
 
 function installNetHomeTrigger() {{
