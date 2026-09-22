@@ -223,11 +223,16 @@ const ALLOWED_PHONE = {json.dumps(phone_digits)};
 
 function pollGoogleVoice() {{
   const props = PropertiesService.getScriptProperties();
+  const allowedDigits = String(ALLOWED_PHONE || '').replace(/\\D/g, '').slice(-10);
+  const subjectNeedle = allowedDigits
+    ? 'subject:"New text message from (' + allowedDigits.slice(0,3) + ') ' + allowedDigits.slice(3,6) + '-' + allowedDigits.slice(6) + '"'
+    : 'subject:"New text message from"';
 
-  // Search broadly, then verify sender + subject in code. This avoids Gmail
-  // search quirks with Google Voice's unique txt.voice.google.com addresses.
-  const threads = GmailApp.search('newer_than:2d', 0, 50);
-  console.log('NetHome: scanned ' + threads.length + ' recent Gmail threads');
+  // Keep Gmail usage very small: only search recent Google Voice notifications
+  // for the one allowed phone, and inspect at most 10 matching threads.
+  const query = subjectNeedle + ' newer_than:1d';
+  const threads = GmailApp.search(query, 0, 10);
+  console.log('NetHome: scanned ' + threads.length + ' matching Google Voice threads');
 
   let candidates = 0;
   let sent = 0;
@@ -245,15 +250,10 @@ function pollGoogleVoice() {{
       if (!from.includes('@txt.voice.google.com')) return;
       if (!/^new text message from/i.test(subject)) return;
 
-      candidates++;
-      console.log('NetHome: Google Voice candidate subject=' + subject + ' from=' + from);
-
       const subjectDigits = subject.replace(/\\D/g, '');
-      const allowedDigits = String(ALLOWED_PHONE || '').replace(/\\D/g, '').slice(-10);
-      if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) {{
-        console.log('NetHome: skipped candidate because phone did not match; subject=' + subjectDigits + ' allowed=' + allowedDigits);
-        return;
-      }}
+      if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) return;
+
+      candidates++;
 
       const command = extractVoiceCommand(message.getPlainBody());
       console.log('NetHome: extracted command=' + command);
@@ -324,7 +324,7 @@ function extractVoiceCommand(body) {{
 
 function installNetHomeTrigger() {{
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(1).create();
+  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(5).create();
   pollGoogleVoice();
 }}
 """
