@@ -38,6 +38,9 @@ SCHEDULE 1 ENABLE / DISABLE / DELETE
 ADD SCHEDULE DAILY 8:00 AM HEAT 68
 ADD SCHEDULE WEEKDAYS 7:30 AM COOL 75
 ADD SCHEDULE MON,WED,FRI 6:00 PM OFF
+WEEK: TUE 11:00 AM HEAT 69; TUE 2:00 PM HEAT 68; WED 8:00 AM HEAT 69
+  - creates all entries for the next 7 days in ONE text
+  - use TODAY, TOMORROW, MON...SUN, or YYYY-MM-DD
 HELP - show this list"""
 
 
@@ -208,7 +211,178 @@ def _parse_sms_time(text: str) -> str | None:
     return f"{hour:02d}:{minute:02d}"
 
 
-def _handle_schedule_command(command: str) -> dict[str, Any] | None:
+def _parse_schedule_action(instruction: str) -> dict[str, Any] | None:
+    text = instruction.strip().upper()
+    if text in {"OFF", "ON"}:
+        return {
+            "action": text.lower(),
+            "mode": None,
+            "temperature": None,
+            "fan": None,
+        }
+
+    m = re.fullmatch(r"(COOL|HEAT)\s+(\d{2}(?:\.\d)?)", text)
+    if m:
+        temp = float(m.group(2))
+        if temp < 50 or temp > 90:
+            return None
+        return {
+            "action": "set",
+            "mode": m.group(1).lower(),
+            "temperature": temp,
+            "fan": None,
+        }
+
+    temp_m = re.fullmatch(r"(?:TEMP|SET)\s+(\d{2}(?:\.\d)?)", text)
+    if temp_m:
+        temp = float(temp_m.group(1))
+        if temp < 50 or temp > 90:
+            return None
+        return {
+            "action": "set",
+            "mode": None,
+            "temperature": temp,
+            "fan": None,
+        }
+
+    fan_m = re.fullmatch(r"FAN\s+(AUTO|LOW|MEDIUM|HIGH)", text)
+    if fan_m:
+        return {
+            "action": "set",
+            "mode": None,
+            "temperature": None,
+            "fan": fan_m.group(1).lower(),
+        }
+
+    return None
+
+
+def _resolve_week_date(day_text: str, tz: ZoneInfo) -> datetime.date | None:
+    key = day_text.strip().upper()
+    today = datetime.now(tz).date()
+
+    if key == "TODAY":
+        return today
+    if key == "TOMORROW":
+        return today + timedelta(days=1)
+
+    try:
+        return datetime.fromisoformat(key).date()
+    except ValueError:
+        pass
+
+    day_map = {
+        "MON": 0, "MONDAY": 0,
+        "TUE": 1, "TUES": 1, "TUESDAY": 1,
+        "WED": 2, "WEDNESDAY": 2,
+        "THU": 3, "THUR": 3, "THURS": 3, "THURSDAY": 3,
+        "FRI": 4, "FRIDAY": 4,
+        "SAT": 5, "SATURDAY": 5,
+        "SUN": 6, "SUNDAY": 6,
+    }
+    if key not in day_map:
+        return None
+
+    delta = (day_map[key] - today.weekday()) % 7
+    return today + timedelta(days=delta)
+
+
+def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
+    normalized = raw_command.strip()
+    m = re.match(r"^(?:WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:\s*(.+)$", normalized, re.I | re.S)
+    if not m:
+        return None
+
+    body = m.group(1).strip()
+    parts = [p.strip() for p in re.split(r"[;\n]+", body) if p.strip()]
+    if not parts:
+        return {
+            "ok": False,
+            "reply": "No entries found. Example: WEEK: TUE 11:00 AM HEAT 69; WED 8:00 AM HEAT 68",
+        }
+    if len(parts) > 40:
+        return {"ok": False, "reply": "Too many entries in one text. Maximum is 40."}
+
+    tz = ZoneInfo("America/New_York")
+    now = datetime.now(tz)
+    parsed: list[dict[str, Any]] = []
+    errors: list[str] = []
+
+    entry_re = re.compile(
+        r"^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{2}-\d{2}-\d{2})\s+"
+        r"(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)$",
+        re.I,
+    )
+
+    for idx, part in enumerate(parts, 1):
+        match = entry_re.fullmatch(part)
+        if not match:
+            errors.append(f"{idx}: use DAY TIME ACTION")
+            continue
+
+        run_date = _resolve_week_date(match.group(1), tz)
+        time_local = _parse_sms_time(match.group(2))
+        action = _parse_schedule_action(match.group(3))
+        if not run_date or not time_local or not action:
+            errors.append(f"{idx}: invalid date/time/action")
+            continue
+
+        hh, mm = [int(x) for x in time_local.split(":")]
+        run_at = datetime(run_date.year, run_date.month, run_date.day, hh, mm, tzinfo=tz)
+
+        # WEEK means the next 7 calendar days, including today.
+        if run_date < now.date() or run_date > now.date() + timedelta(days=6):
+            errors.append(f"{idx}: {run_date.isoformat()} is outside the next 7 days")
+            continue
+        if run_at <= now:
+            errors.append(f"{idx}: {match.group(1).upper()} {match.group(2).upper()} has already passed")
+            continue
+
+        parsed.append({
+            "name": f"SMS week {run_date.isoformat()} {match.group(2).upper()}",
+            "schedule_type": "one_time",
+            "days": "",
+            "start_date": run_date.isoformat(),
+            "end_date": run_date.isoformat(),
+            "time_local": time_local,
+            "action": action["action"],
+            "mode": action["mode"],
+            "temperature": action["temperature"],
+            "fan": action["fan"],
+            "enabled": True,
+        })
+
+    if errors:
+        return {
+            "ok": False,
+            "reply": "Week schedule not saved because some entries need fixing:\n" + "\n".join(errors[:8]),
+        }
+
+    if not parsed:
+        return {"ok": False, "reply": "No valid week schedule entries found."}
+
+    created = [create_schedule(item) for item in parsed]
+    lines = [f"Saved {len(created)} one-time schedules for the next 7 days:"]
+    for i, row in enumerate(created[:12], 1):
+        date_text = str(row.get("start_date") or "")
+        try:
+            d = datetime.fromisoformat(date_text).strftime("%a %b %-d")
+        except Exception:
+            d = date_text
+        lines.append(
+            f"{i}) {d} {datetime.strptime(str(row['time_local'])[:5], '%H:%M').strftime('%-I:%M %p')} - {_schedule_command_text(row)}"
+        )
+    if len(created) > 12:
+        lines.append(f"...and {len(created) - 12} more.")
+    lines.append("Text SCHEDULE to see the upcoming numbered list.")
+    return {"ok": True, "reply": "\n".join(lines)}
+
+
+def _handle_schedule_command(command: str, raw_command: str | None = None) -> dict[str, Any] | None:
+    batch = _handle_week_batch(raw_command or command)
+    if batch is not None:
+        return batch
+
     if command in {"SCHEDULE", "SCHEDULES"}:
         return {"ok": True, "reply": _schedule_list_reply()}
 
@@ -409,11 +583,12 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
 
 
 def process_text_command(raw: str) -> dict[str, Any]:
-    command = " ".join((raw or "").strip().upper().split())
+    raw_text = (raw or "").strip()
+    command = " ".join(raw_text.upper().split())
     if not command:
         return {"ok": False, "reply": HELP_TEXT}
 
-    add_activity("sms", "message_received", "received", command[:200])
+    add_activity("sms", "message_received", "received", raw_text[:500])
     natural = command.lower()
 
     if command in {"HELP", "?", "COMMANDS"}:
@@ -431,7 +606,7 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
 
-    schedule_result = _handle_schedule_command(command)
+    schedule_result = _handle_schedule_command(command, raw_text)
     if schedule_result is not None:
         return schedule_result
 
