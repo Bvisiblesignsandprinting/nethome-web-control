@@ -249,8 +249,9 @@ function pollGoogleVoice() {{
       console.log('NetHome: Google Voice candidate subject=' + subject + ' from=' + from);
 
       const subjectDigits = subject.replace(/\\D/g, '');
-      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) {{
-        console.log('NetHome: skipped candidate because phone did not match');
+      const allowedDigits = String(ALLOWED_PHONE || '').replace(/\\D/g, '').slice(-10);
+      if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) {{
+        console.log('NetHome: skipped candidate because phone did not match; subject=' + subjectDigits + ' allowed=' + allowedDigits);
         return;
       }}
 
