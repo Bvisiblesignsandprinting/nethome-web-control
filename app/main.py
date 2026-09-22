@@ -221,71 +221,138 @@ def _google_voice_apps_script(base_url: str, secret: str, allowed_phone: str) ->
     return f"""const NETHOME_ENDPOINT = {json.dumps(endpoint)};
 const ALLOWED_PHONE = {json.dumps(phone_digits)};
 
+function b64urlDecode(input) {{
+  if (!input) return '';
+  let s = String(input).replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  return Utilities.newBlob(Utilities.base64Decode(s)).getDataAsString();
+}}
+
+function b64urlEncode(input) {{
+  return Utilities.base64EncodeWebSafe(String(input), Utilities.Charset.UTF_8).replace(/=+$/g, '');
+}}
+
+function gmailApi(path, options) {{
+  const opts = options || {{}};
+  opts.headers = Object.assign({{
+    Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
+  }}, opts.headers || {{}});
+  opts.muteHttpExceptions = true;
+  const res = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, opts);
+  const code = res.getResponseCode();
+  const raw = res.getContentText() || '{{}}';
+  if (code < 200 || code >= 300) throw new Error('Gmail API ' + code + ': ' + raw.slice(0, 300));
+  return JSON.parse(raw);
+}}
+
+function headerValue(headers, name) {{
+  const target = String(name).toLowerCase();
+  const h = (headers || []).find(x => String(x.name || '').toLowerCase() === target);
+  return h ? String(h.value || '') : '';
+}}
+
+function messagePlainText(payload) {{
+  if (!payload) return '';
+  if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) {{
+    return b64urlDecode(payload.body.data);
+  }}
+  const parts = payload.parts || [];
+  for (const part of parts) {{
+    const text = messagePlainText(part);
+    if (text) return text;
+  }}
+  if (payload.body && payload.body.data) return b64urlDecode(payload.body.data);
+  return '';
+}}
+
+function sendVoiceReply(to, subject, body, threadId, messageId) {{
+  const profile = gmailApi('profile');
+  const from = String(profile.emailAddress || '');
+  const cleanSubject = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
+  const mime = [
+    'From: ' + from,
+    'To: ' + to,
+    'Subject: ' + cleanSubject,
+    messageId ? 'In-Reply-To: ' + messageId : '',
+    messageId ? 'References: ' + messageId : '',
+    'Content-Type: text/plain; charset=UTF-8',
+    '',
+    body
+  ].filter(Boolean).join('\\r\\n');
+
+  gmailApi('messages/send', {{
+    method: 'post',
+    contentType: 'application/json',
+    payload: JSON.stringify({{raw: b64urlEncode(mime), threadId: threadId}})
+  }});
+}}
+
 function pollGoogleVoice() {{
   const props = PropertiesService.getScriptProperties();
   const allowedDigits = String(ALLOWED_PHONE || '').replace(/\\D/g, '').slice(-10);
-  const subjectNeedle = allowedDigits
-    ? 'subject:"New text message from (' + allowedDigits.slice(0,3) + ') ' + allowedDigits.slice(3,6) + '-' + allowedDigits.slice(6) + '"'
-    : 'subject:"New text message from"';
+  const formattedPhone = allowedDigits
+    ? '(' + allowedDigits.slice(0,3) + ') ' + allowedDigits.slice(3,6) + '-' + allowedDigits.slice(6)
+    : '';
+  const query = formattedPhone
+    ? 'subject:"New text message from ' + formattedPhone + '" newer_than:1d'
+    : 'subject:"New text message from" newer_than:1d';
 
-  // Keep Gmail usage very small: only search recent Google Voice notifications
-  // for the one allowed phone, and inspect at most 10 matching threads.
-  const query = subjectNeedle + ' newer_than:1d';
-  const threads = GmailApp.search(query, 0, 10);
-  console.log('NetHome: scanned ' + threads.length + ' matching Google Voice threads');
+  // Use the Gmail REST API instead of GmailApp so this bridge does not burn
+  // the Apps Script Gmail-service daily invocation quota. Only the newest two
+  // matching messages are inspected each run.
+  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=2');
+  const refs = found.messages || [];
+  console.log('NetHome: found ' + refs.length + ' recent Google Voice messages');
 
   let candidates = 0;
   let sent = 0;
 
-  threads.forEach(thread => {{
-    const messages = thread.getMessages();
+  refs.forEach(ref => {{
+    const metaKey = 'done_' + String(ref.id || '');
+    if (!ref.id || props.getProperty(metaKey)) return;
 
-    messages.forEach(message => {{
-      const messageId = String(message.getId() || '');
-      if (messageId && props.getProperty('done_' + messageId)) return;
+    const msg = gmailApi('messages/' + encodeURIComponent(ref.id) + '?format=full');
+    const headers = (msg.payload && msg.payload.headers) || [];
+    const from = headerValue(headers, 'From').toLowerCase();
+    const subject = headerValue(headers, 'Subject');
+    const rfcMessageId = headerValue(headers, 'Message-ID');
 
-      const from = String(message.getFrom() || '').toLowerCase();
-      const subject = String(message.getSubject() || '');
+    if (!from.includes('@txt.voice.google.com')) return;
+    if (!/^new text message from/i.test(subject)) return;
 
-      if (!from.includes('@txt.voice.google.com')) return;
-      if (!/^new text message from/i.test(subject)) return;
+    const subjectDigits = subject.replace(/\\D/g, '');
+    if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) return;
 
-      const subjectDigits = subject.replace(/\\D/g, '');
-      if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) return;
+    candidates++;
+    const command = extractVoiceCommand(messagePlainText(msg.payload));
+    console.log('NetHome: extracted command=' + command);
+    if (!command) return;
 
-      candidates++;
+    try {{
+      const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
+        method: 'post',
+        contentType: 'application/json',
+        payload: JSON.stringify({{text: command, sender: ALLOWED_PHONE}}),
+        muteHttpExceptions: true
+      }});
 
-      const command = extractVoiceCommand(message.getPlainBody());
-      console.log('NetHome: extracted command=' + command);
-      if (!command) return;
+      const code = response.getResponseCode();
+      const raw = response.getContentText() || '{{}}';
+      console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
 
-      try {{
-        const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
-          method: 'post',
-          contentType: 'application/json',
-          payload: JSON.stringify({{text: command, sender: ALLOWED_PHONE}}),
-          muteHttpExceptions: true
-        }});
+      let result = {{}};
+      try {{ result = JSON.parse(raw); }} catch (_) {{}}
+      const replyText = result.reply || result.detail || 'NetHome command received.';
 
-        const code = response.getResponseCode();
-        const raw = response.getContentText() || '{{}}';
-        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
-
-        let result = {{}};
-        try {{ result = JSON.parse(raw); }} catch (_) {{}}
-        const replyText = result.reply || result.detail || 'NetHome command received.';
-
-        if (code >= 200 && code < 300) {{
-          message.reply(replyText);
-          sent++;
-          if (messageId) props.setProperty('done_' + messageId, new Date().toISOString());
-          message.markRead();
-          console.log('NetHome: reply sent');
-        }}
-      }} catch (err) {{
-        console.log('NetHome bridge error: ' + err);
+      if (code >= 200 && code < 300) {{
+        sendVoiceReply(headerValue(headers, 'From'), subject, replyText, msg.threadId, rfcMessageId);
+        sent++;
+        props.setProperty(metaKey, new Date().toISOString());
+        console.log('NetHome: reply sent');
       }}
-    }});
+    }} catch (err) {{
+      console.log('NetHome bridge error: ' + err);
+    }}
   }});
 
   console.log('NetHome: candidates=' + candidates + ' replies=' + sent);
@@ -324,7 +391,7 @@ function extractVoiceCommand(body) {{
 
 function installNetHomeTrigger() {{
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(5).create();
+  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(1).create();
   pollGoogleVoice();
 }}
 """
