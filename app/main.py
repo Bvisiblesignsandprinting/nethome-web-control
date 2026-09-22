@@ -223,8 +223,14 @@ const ALLOWED_PHONE = {json.dumps(phone_digits)};
 
 function pollGoogleVoice() {{
   const props = PropertiesService.getScriptProperties();
-  const query = 'subject:"New text message from" newer_than:2d';
-  const threads = GmailApp.search(query, 0, 30);
+
+  // Search broadly, then verify sender + subject in code. This avoids Gmail
+  // search quirks with Google Voice's unique txt.voice.google.com addresses.
+  const threads = GmailApp.search('newer_than:2d', 0, 50);
+  console.log('NetHome: scanned ' + threads.length + ' recent Gmail threads');
+
+  let candidates = 0;
+  let sent = 0;
 
   threads.forEach(thread => {{
     const messages = thread.getMessages();
@@ -236,18 +242,21 @@ function pollGoogleVoice() {{
       const from = String(message.getFrom() || '').toLowerCase();
       const subject = String(message.getSubject() || '');
 
-      // Only accept actual Google Voice forwarded text notifications.
       if (!from.includes('@txt.voice.google.com')) return;
       if (!/^new text message from/i.test(subject)) return;
 
+      candidates++;
+      console.log('NetHome: Google Voice candidate subject=' + subject + ' from=' + from);
+
       const subjectDigits = subject.replace(/\\D/g, '');
-      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) return;
+      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) {{
+        console.log('NetHome: skipped candidate because phone did not match');
+        return;
+      }}
 
       const command = extractVoiceCommand(message.getPlainBody());
+      console.log('NetHome: extracted command=' + command);
       if (!command) return;
-
-      let replyText = 'NetHome command failed.';
-      let processedOk = false;
 
       try {{
         const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
@@ -258,25 +267,27 @@ function pollGoogleVoice() {{
         }});
 
         const code = response.getResponseCode();
-        const result = JSON.parse(response.getContentText() || '{{}}');
-        replyText = result.reply || result.detail || replyText;
+        const raw = response.getContentText() || '{{}}';
+        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
+
+        let result = {{}};
+        try {{ result = JSON.parse(raw); }} catch (_) {{}}
+        const replyText = result.reply || result.detail || 'NetHome command received.';
 
         if (code >= 200 && code < 300) {{
           message.reply(replyText);
-          processedOk = true;
-        }} else {{
-          console.log('NetHome HTTP ' + code + ': ' + response.getContentText());
+          sent++;
+          if (messageId) props.setProperty('done_' + messageId, new Date().toISOString());
+          message.markRead();
+          console.log('NetHome: reply sent');
         }}
       }} catch (err) {{
         console.log('NetHome bridge error: ' + err);
       }}
-
-      if (processedOk && messageId) {{
-        props.setProperty('done_' + messageId, new Date().toISOString());
-        message.markRead();
-      }}
     }});
   }});
+
+  console.log('NetHome: candidates=' + candidates + ' replies=' + sent);
 }}
 function extractVoiceCommand(body) {{
   const lines = String(body || '').replace(/\\r/g, '').split('\\n')
