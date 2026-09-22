@@ -301,7 +301,7 @@ function pollGoogleVoice() {{
     ? 'subject:"New text message from ' + formattedPhone + '" newer_than:1d'
     : 'subject:"New text message from" newer_than:1d';
 
-  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=10');
+  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=30');
   const refs = found.messages || [];
   console.log('NetHome: found ' + refs.length + ' recent Google Voice messages');
 
@@ -339,23 +339,33 @@ function pollGoogleVoice() {{
     const item = pending[i];
     if (!item.command) continue;
 
-    if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\\s*:/i.test(item.command)) {{
+    const isWeekStart = /^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\\s*:/i.test(item.command);
+    const isWeekFragment = /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{{2}}-\\d{{2}}-\\d{{2}})\\s+/i.test(item.command);
+
+    if (isWeekStart) {{
       const group = [item];
+
+      // Google Voice can split one long SMS into separate Gmail messages and
+      // those messages are not guaranteed to share the same Gmail thread ID.
+      // Combine nearby schedule-looking pieces from the same allowed phone.
       for (let j = i + 1; j < pending.length; j++) {{
         const next = pending[j];
-        if (next.msg.threadId !== item.msg.threadId) break;
         if (next.ts - item.ts > 180000) break;
+
+        const nextIsFragment =
+          /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{{2}}-\\d{{2}}-\\d{{2}})\\s+/i.test(next.command || '');
+        if (!nextIsFragment) break;
         group.push(next);
       }}
 
       const newestTs = Math.max.apply(null, group.map(x => x.ts || 0));
-      if (Date.now() - newestTs < 30000) {{
+      if (Date.now() - newestTs < 45000) {{
         console.log('NetHome: waiting for remaining WEEK text pieces');
         break;
       }}
 
       const combined = group.map(x => x.command).filter(Boolean).join(' ; ');
-      console.log('NetHome: combined WEEK command=' + combined.slice(0, 800));
+      console.log('NetHome: combined WEEK command=' + combined.slice(0, 1200));
 
       try {{
         const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
@@ -366,7 +376,7 @@ function pollGoogleVoice() {{
         }});
         const code = response.getResponseCode();
         const raw = response.getContentText() || '{{}}';
-        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
+        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 800));
         let result = {{}};
         try {{ result = JSON.parse(raw); }} catch (_) {{}}
         const replyText = result.reply || result.detail || 'NetHome command received.';
@@ -377,12 +387,20 @@ function pollGoogleVoice() {{
           sendVoiceReply(headerValue(last.headers, 'From'), last.subject, replyText, last.msg.threadId, rfcMessageId);
           group.forEach(x => props.setProperty(x.metaKey, new Date().toISOString()));
           sent++;
-          console.log('NetHome: combined WEEK reply sent');
+          console.log('NetHome: combined WEEK reply sent pieces=' + group.length);
           i += group.length - 1;
         }}
       }} catch (err) {{
         console.log('NetHome bridge WEEK error: ' + err);
       }}
+      continue;
+    }}
+
+    // A split schedule fragment must never be sent as a standalone direct command.
+    // If the WEEK opener has not arrived in this poll yet, leave it unprocessed so
+    // the next poll can combine it with the complete batch.
+    if (isWeekFragment) {{
+      console.log('NetHome: holding orphan WEEK fragment=' + item.command.slice(0, 200));
       continue;
     }}
 
