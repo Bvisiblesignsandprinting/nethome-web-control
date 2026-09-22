@@ -222,29 +222,25 @@ def _google_voice_apps_script(base_url: str, secret: str, allowed_phone: str) ->
 const ALLOWED_PHONE = {json.dumps(phone_digits)};
 
 function pollGoogleVoice() {{
-  const query = 'is:unread from:(@txt.voice.google.com) subject:"New text message from" newer_than:2d';
+  const labelName = 'NetHomeProcessed';
+  const label = GmailApp.getUserLabelByName(labelName) || GmailApp.createLabel(labelName);
+  const query = 'from:txt.voice.google.com subject:"New text message from" newer_than:2d -label:' + labelName;
   const threads = GmailApp.search(query, 0, 20);
 
   threads.forEach(thread => {{
     const messages = thread.getMessages();
-    messages.forEach(message => {{
-      if (!message.isUnread()) return;
+    let processed = false;
 
+    messages.forEach(message => {{
       const from = String(message.getFrom() || '').toLowerCase();
       const subject = String(message.getSubject() || '');
       if (!from.includes('@txt.voice.google.com')) return;
 
       const subjectDigits = subject.replace(/\\D/g, '');
-      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) {{
-        message.markRead();
-        return;
-      }}
+      if (ALLOWED_PHONE && !subjectDigits.endsWith(ALLOWED_PHONE)) return;
 
       const command = extractVoiceCommand(message.getPlainBody());
-      if (!command) {{
-        message.markRead();
-        return;
-      }}
+      if (!command) return;
 
       let replyText = 'NetHome command failed.';
       try {{
@@ -260,10 +256,14 @@ function pollGoogleVoice() {{
         replyText = 'NetHome error: ' + String(err).slice(0, 120);
       }}
 
-      // Google Voice explicitly supports replying to the forwarded email.
       message.reply(replyText);
-      message.markRead();
+      processed = true;
     }});
+
+    if (processed) {{
+      thread.addLabel(label);
+      thread.markRead();
+    }}
   }});
 }}
 
