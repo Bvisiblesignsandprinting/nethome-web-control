@@ -377,20 +377,18 @@ function extractVoiceCommand(body) {{
     return false;
   }};
 
-  // Prefer a line that clearly looks like one of our AC commands.
-  const commandPattern = /^(STATUS|ON|OFF|HELP|START|YES|STOP|WEATHER|MODE|TEMP(?:ERATURE)?\\s+\\d+(?:\\.\\d+)?|SET\\s+\\d+(?:\\.\\d+)?|COOL\\s+\\d+(?:\\.\\d+)?|HEAT\\s+\\d+(?:\\.\\d+)?|FAN(?:\\s+(?:AUTO|LOW|MEDIUM|HIGH))?)$/i;
+  const useful = [];
   for (const line of lines) {{
+    if (/^to respond to this text message/i.test(line)) break;
     if (isBoilerplate(line)) continue;
-    if (commandPattern.test(line)) return line;
+    useful.push(line);
   }}
 
-  // Fallback for supported natural-language commands.
-  for (const line of lines) {{
-    if (isBoilerplate(line)) continue;
-    return line;
-  }}
+  if (!useful.length) return '';
 
-  return '';
+  // Preserve multi-line week schedules by joining the SMS lines with semicolons.
+  // Single-line commands remain unchanged.
+  return useful.join(' ; ');
 }}
 
 function installNetHomeTrigger() {{
