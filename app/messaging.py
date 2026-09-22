@@ -174,16 +174,59 @@ def _schedule_list_reply() -> str:
     entries = _schedule_entries()
     if not entries:
         return (
-            "No schedules. Add one like: "
+            "📅 No schedules yet.\n\n"
+            "Example:\n"
             "ADD SCHEDULE DAILY 8:00 AM HEAT 68"
         )
-    lines = ["Upcoming schedules:"]
+
+    def _display_action(row: dict[str, Any]) -> str:
+        action = str(row.get("action") or "set").lower()
+        if action == "off":
+            return "⏹️ Off"
+        if action == "on":
+            return "▶️ On"
+
+        mode = str(row.get("mode") or "").lower()
+        temp = row.get("temperature")
+        fan = row.get("fan")
+
+        mode_icon = {
+            "heat": "🔥",
+            "cool": "❄️",
+            "dry": "💧",
+            "fan": "💨",
+            "auto": "🔄",
+        }.get(mode, "🌡️")
+
+        parts = []
+        if mode:
+            parts.append(mode.title())
+        if temp is not None:
+            parts.append(f"{float(temp):g}°F")
+        if fan:
+            parts.append(f"Fan {str(fan).title()}")
+        return f"{mode_icon} " + " • ".join(parts or ["Set"])
+
+    lines = ["📅 Upcoming schedules", ""]
     for i, (row, nxt) in enumerate(entries[:8], 1):
-        state = "" if row.get("enabled") else " [DISABLED]"
-        when = nxt.strftime("%a %b %-d, %-I:%M %p") if nxt else "No upcoming run"
-        lines.append(f"{i}) {when} - {_schedule_command_text(row)}{state}")
-    lines.append("Change one with: SCHEDULE 1 HEAT 68, SCHEDULE 1 TIME 8:30 PM, or SCHEDULE 1 OFF.")
-    return "\n".join(lines)
+        if nxt:
+            when = nxt.strftime("%a %b %-d • %-I:%M %p")
+        else:
+            when = "No upcoming run"
+
+        disabled = not row.get("enabled")
+        status = " ⏸️ Disabled" if disabled else ""
+        lines.append(f"{i}. {when}{status}")
+        lines.append(f"   {_display_action(row)}")
+        lines.append("")
+
+    lines.extend([
+        "✏️ To change one:",
+        "SCHEDULE 1 HEAT 68",
+        "SCHEDULE 1 TIME 8:30 PM",
+        "SCHEDULE 1 OFF",
+    ])
+    return "\n".join(lines).rstrip()
 
 
 def _schedule_by_number(number: int) -> tuple[dict[str, Any], datetime | None] | None:
