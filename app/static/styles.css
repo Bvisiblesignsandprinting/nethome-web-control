@@ -28,3 +28,59 @@
 .feature-row button:hover{background:#f1f7fa}
 .feature-row button.active{background:#dcefff;color:#1f5e88}
 .feature-row button em{display:block;font-style:normal;font-size:9px;margin-top:3px;color:inherit}
+
+/* Schedule bulk-selection layout polish */
+.schedule-item{
+  grid-template-columns:32px minmax(0,1fr) auto;
+  padding:14px 16px;
+  gap:14px;
+}
+.schedule-select{
+  align-self:center;
+  padding:0;
+}
+.schedule-main{
+  justify-content:flex-start;
+}
+.schedule-time{
+  min-width:88px;
+  font-size:20px;
+}
+.schedule-copy .title{
+  font-size:14px;
+}
+.schedule-actions{
+  justify-content:flex-end;
+}
+.schedule-bulk-bar{
+  padding:10px 14px;
+}
+@media(max-width:760px){
+  .schedule-item{
+    grid-template-columns:28px 1fr;
+    align-items:start;
+  }
+  .schedule-actions{
+    grid-column:2;
+    justify-content:flex-start;
+    margin-top:2px;
+  }
+  .schedule-main{
+    align-items:flex-start;
+  }
+  .schedule-time{
+    min-width:72px;
+    font-size:18px;
+  }
+  .schedule-bulk-bar{
+    align-items:flex-start;
+  }
+  .bulk-count{
+    width:100%;
+    margin-right:0;
+    order:3;
+  }
+  .bulk-actions{
+    width:100%;
+  }
+}
