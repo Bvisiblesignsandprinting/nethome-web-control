@@ -89,6 +89,17 @@
           <button id="add-schedule">+ New schedule</button>
         </div>
 
+        <div id="schedule-bulk-bar" class="schedule-bulk-bar hidden">
+          <label class="bulk-select-all"><input type="checkbox" id="schedule-select-all"> <span>Select all</span></label>
+          <span id="schedule-selected-count" class="bulk-count">0 selected</span>
+          <div class="bulk-actions">
+            <button type="button" id="bulk-enable" class="action-btn">Enable</button>
+            <button type="button" id="bulk-disable" class="action-btn">Disable</button>
+            <button type="button" id="bulk-delete" class="action-btn danger">Delete selected</button>
+            <button type="button" id="bulk-clear" class="action-btn">Clear</button>
+          </div>
+        </div>
+
         <div id="schedule-list" class="schedule-list"></div>
 
         <form id="schedule-form" class="card form hidden">
