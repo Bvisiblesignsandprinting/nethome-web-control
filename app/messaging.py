@@ -1,13 +1,44 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from .db import add_activity, get_latest_device_state, save_device_state
+from .db import (
+    add_activity,
+    create_schedule,
+    delete_schedule,
+    get_latest_device_state,
+    list_schedules,
+    save_device_state,
+    update_schedule,
+)
 from .midea_client import midea
-from .weather import comfort_recommendation
+from .weather import comfort_recommendation, current_weather, forecast_range, forecast_summary
 
-HELP_TEXT = "STATUS, ON, OFF, TEMP 72, COOL 72, HEAT 70, FAN HIGH, WEATHER."
+HELP_TEXT = """NetHome commands:
+STATUS - live AC status
+ON / OFF - power
+TEMP 72 - change target temperature
+COOL 72 / HEAT 68 - set mode + temperature
+FAN AUTO|LOW|MEDIUM|HIGH
+MODE - current mode
+WEATHER - today
+WEATHER NOW - current conditions
+WEATHER TOMORROW / WEATHER FRIDAY
+WEATHER 3 DAYS / WEATHER WEEK
+WEATHER TOMORROW RECOMMEND
+SCHEDULE - numbered schedule list
+SCHEDULE 1 - details
+SCHEDULE 1 HEAT 68 / COOL 75 / OFF / ON
+SCHEDULE 1 TIME 8:30 PM
+SCHEDULE 1 FAN HIGH
+SCHEDULE 1 ENABLE / DISABLE / DELETE
+ADD SCHEDULE DAILY 8:00 AM HEAT 68
+ADD SCHEDULE WEEKDAYS 7:30 AM COOL 75
+ADD SCHEDULE MON,WED,FRI 6:00 PM OFF
+HELP - show this list"""
 
 
 def _short_error(exc: Exception) -> str:
@@ -55,6 +86,328 @@ def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
         return {"ok": False, "reply": _short_error(exc)}
 
 
+
+def _schedule_next_occurrence(schedule: dict[str, Any]) -> datetime | None:
+    tz_name = str(schedule.get("timezone") or "America/New_York")
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo("America/New_York")
+    now = datetime.now(tz)
+    time_text = str(schedule.get("time_local") or "00:00")
+    try:
+        hour, minute = [int(x) for x in time_text[:5].split(":")]
+    except Exception:
+        return None
+
+    start_s = str(schedule.get("start_date") or "")
+    end_s = str(schedule.get("end_date") or "")
+    start_date = datetime.fromisoformat(start_s).date() if start_s else None
+    end_date = datetime.fromisoformat(end_s).date() if end_s else None
+    schedule_type = str(schedule.get("schedule_type") or "weekly")
+    selected = {d.strip() for d in str(schedule.get("days") or "").split(",") if d.strip()}
+    day_names = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+    for offset in range(0, 370):
+        day = (now + timedelta(days=offset)).date()
+        if start_date and day < start_date:
+            continue
+        if end_date and day > end_date:
+            break
+
+        if schedule_type == "one_time":
+            if not start_date or day != start_date:
+                continue
+        elif schedule_type == "weekdays":
+            if day.weekday() > 4:
+                continue
+        elif schedule_type == "daily":
+            pass
+        elif schedule_type == "weekly":
+            if day_names[day.weekday()] not in selected:
+                continue
+        else:
+            continue
+
+        candidate = datetime(day.year, day.month, day.day, hour, minute, tzinfo=tz)
+        if candidate >= now:
+            return candidate
+    return None
+
+
+def _schedule_entries() -> list[tuple[dict[str, Any], datetime | None]]:
+    entries = []
+    for row in list_schedules():
+        nxt = _schedule_next_occurrence(row)
+        entries.append((row, nxt))
+    entries.sort(
+        key=lambda item: (
+            0 if item[0].get("enabled") else 1,
+            item[1] is None,
+            item[1] or datetime.max.replace(tzinfo=ZoneInfo("UTC")),
+            int(item[0].get("id") or 0),
+        )
+    )
+    return entries
+
+
+def _schedule_command_text(schedule: dict[str, Any]) -> str:
+    action = str(schedule.get("action") or "set").lower()
+    if action == "off":
+        return "OFF"
+    if action == "on":
+        return "ON"
+    pieces = []
+    mode = schedule.get("mode")
+    temp = schedule.get("temperature")
+    fan = schedule.get("fan")
+    if mode:
+        pieces.append(str(mode).upper())
+    if temp is not None:
+        pieces.append(f"{float(temp):g}F")
+    if fan:
+        pieces.append(f"Fan {str(fan).title()}")
+    return " ".join(pieces) if pieces else "SET"
+
+
+def _schedule_list_reply() -> str:
+    entries = _schedule_entries()
+    if not entries:
+        return (
+            "No schedules. Add one like: "
+            "ADD SCHEDULE DAILY 8:00 AM HEAT 68"
+        )
+    lines = ["Upcoming schedules:"]
+    for i, (row, nxt) in enumerate(entries[:8], 1):
+        state = "" if row.get("enabled") else " [DISABLED]"
+        when = nxt.strftime("%a %b %-d, %-I:%M %p") if nxt else "No upcoming run"
+        lines.append(f"{i}) {when} - {_schedule_command_text(row)}{state}")
+    lines.append("Change one with: SCHEDULE 1 HEAT 68, SCHEDULE 1 TIME 8:30 PM, or SCHEDULE 1 OFF.")
+    return "\n".join(lines)
+
+
+def _schedule_by_number(number: int) -> tuple[dict[str, Any], datetime | None] | None:
+    entries = _schedule_entries()
+    if number < 1 or number > len(entries):
+        return None
+    return entries[number - 1]
+
+
+def _parse_sms_time(text: str) -> str | None:
+    match = re.fullmatch(r"(\d{1,2})(?::(\d{2}))?\s*(AM|PM)", text.strip(), re.I)
+    if not match:
+        return None
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    if hour < 1 or hour > 12 or minute > 59:
+        return None
+    if match.group(3).upper() == "PM" and hour != 12:
+        hour += 12
+    if match.group(3).upper() == "AM" and hour == 12:
+        hour = 0
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _handle_schedule_command(command: str) -> dict[str, Any] | None:
+    if command in {"SCHEDULE", "SCHEDULES"}:
+        return {"ok": True, "reply": _schedule_list_reply()}
+
+    detail = re.fullmatch(r"SCHEDULE\s+(\d+)", command)
+    if detail:
+        item = _schedule_by_number(int(detail.group(1)))
+        if not item:
+            return {"ok": False, "reply": "Schedule number not found. Text SCHEDULE to refresh the list."}
+        row, nxt = item
+        when = nxt.strftime("%a %b %-d, %-I:%M %p") if nxt else "No upcoming run"
+        return {
+            "ok": True,
+            "reply": (
+                f"Schedule {detail.group(1)}: {row.get('name') or 'Unnamed'} | "
+                f"{when} | {_schedule_command_text(row)} | "
+                f"{'Enabled' if row.get('enabled') else 'Disabled'}. "
+                "Change with HEAT 68, COOL 75, OFF, ON, TIME 8:30 PM, FAN HIGH, ENABLE, DISABLE, or DELETE."
+            ),
+        }
+
+    change = re.fullmatch(r"SCHEDULE\s+(\d+)\s+(.+)", command)
+    if change:
+        num = int(change.group(1))
+        instruction = change.group(2).strip()
+        item = _schedule_by_number(num)
+        if not item:
+            return {"ok": False, "reply": "Schedule number not found. Text SCHEDULE to refresh the list."}
+        row, _ = item
+        sid = int(row["id"])
+
+        if instruction == "DELETE":
+            delete_schedule(sid)
+            return {"ok": True, "reply": f"Deleted schedule {num}.\n{_schedule_list_reply()}"}
+        if instruction in {"ENABLE", "DISABLE"}:
+            updated = update_schedule(sid, {"enabled": instruction == "ENABLE"})
+            return {"ok": True, "reply": f"Schedule {num} {'enabled' if updated and updated.get('enabled') else 'disabled'}."}
+        if instruction in {"OFF", "ON"}:
+            update_schedule(sid, {"action": instruction.lower(), "mode": None, "temperature": None, "fan": None})
+            return {"ok": True, "reply": f"Schedule {num} changed to {instruction}."}
+
+        t = re.fullmatch(r"TIME\s+(.+)", instruction)
+        if t:
+            parsed = _parse_sms_time(t.group(1))
+            if not parsed:
+                return {"ok": False, "reply": "Use a time like: SCHEDULE 1 TIME 8:30 PM"}
+            update_schedule(sid, {"time_local": parsed})
+            return {"ok": True, "reply": f"Schedule {num} time updated to {t.group(1).upper()}."}
+
+        m = re.fullmatch(r"(COOL|HEAT)\s+(\d{2}(?:\.\d)?)", instruction)
+        if m:
+            temp = float(m.group(2))
+            if temp < 50 or temp > 90:
+                return {"ok": False, "reply": "Temperature must be 50-90F."}
+            update_schedule(
+                sid,
+                {"action": "set", "mode": m.group(1).lower(), "temperature": temp},
+            )
+            return {"ok": True, "reply": f"Schedule {num} changed to {m.group(1)} {temp:g}F."}
+
+        temp_m = re.fullmatch(r"(?:TEMP|SET)\s+(\d{2}(?:\.\d)?)", instruction)
+        if temp_m:
+            temp = float(temp_m.group(1))
+            if temp < 50 or temp > 90:
+                return {"ok": False, "reply": "Temperature must be 50-90F."}
+            update_schedule(sid, {"action": "set", "temperature": temp})
+            return {"ok": True, "reply": f"Schedule {num} temperature changed to {temp:g}F."}
+
+        fan_m = re.fullmatch(r"FAN\s+(AUTO|LOW|MEDIUM|HIGH)", instruction)
+        if fan_m:
+            update_schedule(sid, {"action": "set", "fan": fan_m.group(1).lower()})
+            return {"ok": True, "reply": f"Schedule {num} fan changed to {fan_m.group(1)}."}
+
+        return {"ok": False, "reply": "Unknown schedule change. Text SCHEDULE 1 for examples."}
+
+    add = re.fullmatch(
+        r"ADD\s+SCHEDULE\s+([A-Z,]+)\s+(\d{1,2}(?::\d{2})?\s*(?:AM|PM))\s+(.+)",
+        command,
+    )
+    if add:
+        repeat = add.group(1)
+        time_local = _parse_sms_time(add.group(2))
+        instruction = add.group(3).strip()
+        if not time_local:
+            return {"ok": False, "reply": "Use a time like 8:00 AM."}
+
+        if repeat == "DAILY":
+            schedule_type, days = "daily", "Mon,Tue,Wed,Thu,Fri,Sat,Sun"
+        elif repeat == "WEEKDAYS":
+            schedule_type, days = "weekdays", "Mon,Tue,Wed,Thu,Fri"
+        else:
+            day_map = {
+                "MON": "Mon", "TUE": "Tue", "WED": "Wed", "THU": "Thu",
+                "FRI": "Fri", "SAT": "Sat", "SUN": "Sun",
+            }
+            raw_days = repeat.split(",")
+            if not raw_days or any(d not in day_map for d in raw_days):
+                return {"ok": False, "reply": "Use DAILY, WEEKDAYS, or days like MON,WED,FRI."}
+            schedule_type, days = "weekly", ",".join(day_map[d] for d in raw_days)
+
+        payload: dict[str, Any] = {
+            "name": f"SMS {repeat} {add.group(2).upper()}",
+            "schedule_type": schedule_type,
+            "days": days,
+            "start_date": None,
+            "end_date": None,
+            "time_local": time_local,
+            "action": "set",
+            "mode": None,
+            "temperature": None,
+            "fan": None,
+            "enabled": True,
+        }
+
+        if instruction in {"OFF", "ON"}:
+            payload["action"] = instruction.lower()
+        else:
+            m = re.fullmatch(r"(COOL|HEAT)\s+(\d{2}(?:\.\d)?)", instruction)
+            if not m:
+                return {
+                    "ok": False,
+                    "reply": "Add format: ADD SCHEDULE DAILY 8:00 AM HEAT 68 (or COOL 75 / ON / OFF).",
+                }
+            temp = float(m.group(2))
+            if temp < 50 or temp > 90:
+                return {"ok": False, "reply": "Temperature must be 50-90F."}
+            payload["mode"] = m.group(1).lower()
+            payload["temperature"] = temp
+
+        create_schedule(payload)
+        return {"ok": True, "reply": "Schedule added.\n" + _schedule_list_reply()}
+
+    return None
+
+
+def _weather_command_reply(command: str) -> dict[str, Any] | None:
+    natural = command.lower()
+    if "weather" not in natural:
+        return None
+    try:
+        if re.search(r"\bnow\b", natural):
+            cur = current_weather()
+            today = forecast_summary("today")
+            return {
+                "ok": True,
+                "reply": (
+                    f"Now {cur['temperature_f']}F, feels {cur['feels_like_f']}F, "
+                    f"wind {cur['wind_mph']} mph. Today high {today['high_f']}F, "
+                    f"low {today['low_f']}F, rain {today['rain_chance']}%."
+                ),
+            }
+
+        if re.search(r"\bweek\b", natural):
+            count = 7
+            forecasts = forecast_range(count)
+            lines = [
+                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}/{f['low_f']}F rain {f['rain_chance']}%"
+                for f in forecasts
+            ]
+            return {"ok": True, "reply": "7-day forecast:\n" + "\n".join(lines)}
+
+        days_match = re.search(r"\b([2-8])\s*days?\b", natural)
+        if days_match:
+            count = int(days_match.group(1))
+            forecasts = forecast_range(count)
+            lines = [
+                f"{datetime.fromisoformat(f['date']).strftime('%a')}: {f['high_f']}/{f['low_f']}F rain {f['rain_chance']}%"
+                for f in forecasts
+            ]
+            return {"ok": True, "reply": f"{count}-day forecast:\n" + "\n".join(lines)}
+
+        day = "today"
+        for token in ["tomorrow", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"]:
+            if token in natural:
+                day = token
+                break
+        date_match = re.search(r"\b(20\d{2}-\d{2}-\d{2})\b", command)
+        if date_match:
+            day = date_match.group(1)
+
+        rec = comfort_recommendation(day)
+        f = rec["forecast"]
+        label = datetime.fromisoformat(f["date"]).strftime("%a %b %-d")
+        reply = f"{label}: high {f['high_f']}F, low {f['low_f']}F, rain {f['rain_chance']}%."
+        if any(word in natural for word in ["recommend", "should", "set", "based"]):
+            reply += f" Recommend {str(rec['recommended_mode']).upper()} {rec['recommended_temperature']}F."
+        if any(p in natural for p in ["set it", "set the ac", "do it", "based on"]):
+            payload = {
+                "action": "set",
+                "mode": rec["recommended_mode"],
+                "temperature": rec["recommended_temperature"],
+            }
+            result = _execute(payload, f"{str(rec['recommended_mode']).upper()} {rec['recommended_temperature']}F")
+            result["reply"] = reply + " " + result["reply"]
+            return result
+        return {"ok": True, "reply": reply}
+    except Exception as exc:
+        return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
+
+
 def process_text_command(raw: str) -> dict[str, Any]:
     command = " ".join((raw or "").strip().upper().split())
     if not command:
@@ -78,35 +431,13 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
 
-    if "weather" in natural:
-        day = "tomorrow" if "tomorrow" in natural else "today"
-        try:
-            rec = comfort_recommendation(day)
-            f = rec["forecast"]
-            reply = (
-                f"{day.title()}: high {f['high_f']}F, low {f['low_f']}F, "
-                f"rain {f['rain_chance']}%."
-            )
-            if any(word in natural for word in ["set", "should", "recommend", "based"]):
-                reply += (
-                    f" Recommend {rec['recommended_mode']} "
-                    f"{rec['recommended_temperature']}F."
-                )
-                if any(word in natural for word in ["set it", "set the ac", "do it", "based on"]):
-                    payload = {
-                        "action": "set",
-                        "mode": rec["recommended_mode"],
-                        "temperature": rec["recommended_temperature"],
-                    }
-                    result = _execute(
-                        payload,
-                        f"{str(rec['recommended_mode']).upper()} {rec['recommended_temperature']}F",
-                    )
-                    result["reply"] = reply + " " + result["reply"]
-                    return result
-            return {"ok": True, "reply": reply}
-        except Exception as exc:
-            return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
+    schedule_result = _handle_schedule_command(command)
+    if schedule_result is not None:
+        return schedule_result
+
+    weather_result = _weather_command_reply(command)
+    if weather_result is not None:
+        return weather_result
 
     if any(p in natural for p in ["what should i set", "what should the ac", "make it comfortable"]):
         try:
