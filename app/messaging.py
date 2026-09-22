@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime, timedelta
 from typing import Any
+from urllib.request import Request as UrlRequest, urlopen
 from zoneinfo import ZoneInfo
 
+from .config import settings
 from .db import (
     add_activity,
     create_schedule,
@@ -17,31 +20,25 @@ from .db import (
 from .midea_client import midea
 from .weather import comfort_recommendation, current_weather, forecast_range, forecast_summary
 
-HELP_TEXT = """NetHome commands:
-STATUS - live AC status
-ON / OFF - power
-TEMP 72 - change target temperature
-COOL 72 / HEAT 68 - set mode + temperature
-FAN AUTO|LOW|MEDIUM|HIGH
-MODE - current mode
-WEATHER - today
-WEATHER NOW - current conditions
-WEATHER TOMORROW / WEATHER FRIDAY
-WEATHER 3 DAYS / WEATHER WEEK
-WEATHER TOMORROW RECOMMEND
-SCHEDULE - numbered schedule list
-SCHEDULE 1 - details
-SCHEDULE 1 HEAT 68 / COOL 75 / OFF / ON
-SCHEDULE 1 TIME 8:30 PM
-SCHEDULE 1 FAN HIGH
-SCHEDULE 1 ENABLE / DISABLE / DELETE
-ADD SCHEDULE DAILY 8:00 AM HEAT 68
-ADD SCHEDULE WEEKDAYS 7:30 AM COOL 75
-ADD SCHEDULE MON,WED,FRI 6:00 PM OFF
-WEEK: TUE 11:00 AM HEAT 69; TUE 2:00 PM HEAT 68; WED 8:00 AM HEAT 69
-  - creates all entries for the next 7 days in ONE text
-  - use TODAY, TOMORROW, MON...SUN, or YYYY-MM-DD
-HELP - show this list"""
+HELP_TEXT = """NetHome AC Control:
+Just text what you want in normal English.
+
+Examples:
+What's the AC status?
+Turn it on.
+Make it 72 degrees.
+Put it on cool.
+Make it a little colder.
+Set the fan to high.
+What's the weather tomorrow?
+What temperature do you recommend tonight?
+Turn the AC off at 11 PM.
+Set up my AC schedule for tomorrow.
+What's my schedule?
+
+Short commands also work: STATUS, ON, OFF, COOL 72, HEAT 70, FAN AUTO.
+
+If I'm not sure what you mean, I'll ask before changing the AC."""
 
 
 def _short_error(exc: Exception) -> str:
@@ -631,6 +628,167 @@ def _weather_command_reply(command: str) -> dict[str, Any] | None:
         return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
 
 
+def _ai_interpret(raw_text: str) -> dict[str, Any] | None:
+    """Translate natural NetHome SMS into a safe existing command or clarification."""
+    if not settings.openai_api_key:
+        return None
+
+    cached = get_latest_device_state()
+    state_text = "Current AC state unavailable."
+    if cached and cached.get("state"):
+        try:
+            state_text = "Current AC state: " + _status_reply(cached["state"])
+        except Exception:
+            pass
+
+    schema = {
+        "type": "object",
+        "properties": {
+            "kind": {"type": "string", "enum": ["command", "clarify", "answer"]},
+            "command": {"type": ["string", "null"]},
+            "reply": {"type": "string"},
+        },
+        "required": ["kind", "command", "reply"],
+        "additionalProperties": False,
+    }
+    instructions = f"""You are the natural-language interpreter for a private NetHome AC Control SMS system.
+The authorized owner is texting their own HVAC controller. Keep replies short enough for SMS.
+
+{state_text}
+
+Return a command only when the user's intent is clear. Never guess a temperature, time, date, mode, or schedule.
+If a request could cause an HVAC change and an important detail is ambiguous, use kind=clarify and ask one short question.
+For harmless informational questions, you may map them to an existing command.
+For unrelated general questions, use kind=answer and briefly say this SMS assistant is for AC, schedules, and weather.
+
+Allowed canonical commands:
+STATUS
+MODE
+ON
+OFF
+TEMP <50-90>
+COOL <50-90>
+HEAT <50-90>
+FAN AUTO|LOW|MEDIUM|HIGH
+WEATHER
+WEATHER NOW
+WEATHER TOMORROW
+WEATHER <weekday>
+WEATHER <2-8> DAYS
+WEATHER WEEK
+WEATHER TOMORROW RECOMMEND
+SCHEDULE
+SCHEDULE <number>
+SCHEDULE <number> HEAT <50-90>
+SCHEDULE <number> COOL <50-90>
+SCHEDULE <number> OFF
+SCHEDULE <number> ON
+SCHEDULE <number> TIME <time AM/PM>
+SCHEDULE <number> FAN AUTO|LOW|MEDIUM|HIGH
+SCHEDULE <number> ENABLE|DISABLE|DELETE
+ADD SCHEDULE DAILY <time AM/PM> HEAT|COOL <50-90>
+ADD SCHEDULE WEEKDAYS <time AM/PM> HEAT|COOL <50-90>
+ADD SCHEDULE <MON,WED,...> <time AM/PM> HEAT|COOL <50-90>
+WEEK: <TODAY|TOMORROW|weekday|YYYY-MM-DD> <time AM/PM> <HEAT n|COOL n|ON|OFF>; ...
+
+Examples:
+"what is the AC doing" -> STATUS
+"turn it on" -> ON
+"make it 72" -> TEMP 72
+"put it on cool at 72" -> COOL 72
+"make it a little colder" -> clarify; ask whether to lower by 2F or use a specific temperature
+"weather tomorrow" -> WEATHER TOMORROW
+"what should I set it to tomorrow" -> WEATHER TOMORROW RECOMMEND
+"turn it off tomorrow at 11 pm" -> WEEK: TOMORROW 11:00 PM OFF
+"what's my schedule" -> SCHEDULE
+"set schedule 2 to heat 69" -> SCHEDULE 2 HEAT 69
+"""
+
+    payload = {
+        "model": settings.openai_model,
+        "instructions": instructions,
+        "input": raw_text,
+        "max_output_tokens": 180,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "nethome_sms_intent",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+    try:
+        req = UrlRequest(
+            "https://api.openai.com/v1/responses",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {settings.openai_api_key}",
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        output_text = str(data.get("output_text") or "").strip()
+        if not output_text:
+            for item in data.get("output") or []:
+                for part in item.get("content") or []:
+                    if part.get("type") in {"output_text", "text"} and part.get("text"):
+                        output_text = str(part["text"]).strip()
+                        break
+                if output_text:
+                    break
+        if not output_text:
+            return None
+        parsed = json.loads(output_text)
+        if not isinstance(parsed, dict):
+            return None
+        return parsed
+    except Exception as exc:
+        add_activity("sms", "ai_interpret", "error", str(exc)[:300])
+        return None
+
+
+def _safe_ai_command(command: str) -> bool:
+    text = " ".join((command or "").upper().split())
+    patterns = [
+        r"STATUS", r"MODE", r"ON", r"OFF",
+        r"(?:TEMP|SET|TEMPERATURE)\s+\d{2}(?:\.\d)?",
+        r"(?:COOL|HEAT)\s+\d{2}(?:\.\d)?",
+        r"FAN\s+(?:AUTO|LOW|MEDIUM|HIGH)",
+        r"WEATHER(?:\s+(?:NOW|TODAY|TOMORROW|MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|WEEK))?(?:\s+RECOMMEND)?",
+        r"WEATHER\s+[2-8]\s+DAYS?",
+        r"SCHEDULES?",
+        r"SCHEDULE\s+\d+(?:\s+(?:HEAT\s+\d{2}(?:\.\d)?|COOL\s+\d{2}(?:\.\d)?|OFF|ON|TIME\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)|FAN\s+(?:AUTO|LOW|MEDIUM|HIGH)|ENABLE|DISABLE|DELETE))?",
+        r"ADD\s+SCHEDULE\s+(?:DAILY|WEEKDAYS|(?:MON|TUE|WED|THU|FRI|SAT|SUN)(?:,(?:MON|TUE|WED|THU|FRI|SAT|SUN))*)\s+\d{1,2}(?::\d{2})?\s*(?:AM|PM)\s+(?:(?:HEAT|COOL)\s+\d{2}(?:\.\d)?|ON|OFF)",
+        r"(?:WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:\s+.+",
+    ]
+    return any(re.fullmatch(pattern, text, re.I | re.S) for pattern in patterns)
+
+
+def _ai_fallback(raw_text: str) -> dict[str, Any] | None:
+    interpreted = _ai_interpret(raw_text)
+    if not interpreted:
+        return None
+
+    kind = str(interpreted.get("kind") or "")
+    reply = str(interpreted.get("reply") or "").strip()
+    ai_command = str(interpreted.get("command") or "").strip()
+
+    if kind == "clarify":
+        return {"ok": True, "reply": reply or "What exactly would you like me to change?"}
+    if kind == "answer":
+        return {"ok": True, "reply": reply or "I can help with the AC, schedules, and weather."}
+    if kind == "command" and ai_command and _safe_ai_command(ai_command):
+        result = process_text_command(ai_command)
+        if result.get("ok"):
+            add_activity("sms", "ai_interpret", "success", f"{raw_text[:120]} -> {ai_command[:120]}")
+        return result
+    return None
+
+
 def process_text_command(raw: str) -> dict[str, Any]:
     raw_text = (raw or "").strip()
     command = " ".join(raw_text.upper().split())
@@ -676,6 +834,70 @@ def process_text_command(raw: str) -> dict[str, Any]:
             }
         except Exception as exc:
             return {"ok": False, "reply": f"Weather lookup failed: {str(exc)[:120]}"}
+
+    # Common conversational phrases work even when the optional AI fallback is not configured.
+    if any(p in natural for p in ["what's the ac status", "what is the ac status", "ac status", "what's the ac doing", "what is the ac doing"]):
+        command = "STATUS"
+
+    if any(p in natural for p in ["what's my schedule", "what is my schedule", "show my schedule", "show schedule"]):
+        command = "SCHEDULE"
+        schedule_result = _handle_schedule_command(command, raw_text)
+        if schedule_result is not None:
+            return schedule_result
+
+    if any(p in natural for p in ["a little colder", "a bit colder", "make it colder"]):
+        return {
+            "ok": True,
+            "reply": "Sure. Do you want me to lower the current temperature by 2F, or set a specific temperature?",
+        }
+    if any(p in natural for p in ["a little warmer", "a bit warmer", "make it warmer"]):
+        return {
+            "ok": True,
+            "reply": "Sure. Do you want me to raise the current temperature by 2F, or set a specific temperature?",
+        }
+
+    # A future time in a power request must never be mistaken for an immediate ON/OFF.
+    timed_power = re.search(
+        r"\b(?:turn|switch|shut)\b.*?\b(on|off)\b.*?\b(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b",
+        natural,
+    )
+    if timed_power:
+        action = timed_power.group(1).upper()
+        hour = timed_power.group(2)
+        minute = timed_power.group(3) or "00"
+        ampm = timed_power.group(4).upper()
+        day = None
+        if "tomorrow" in natural:
+            day = "TOMORROW"
+        elif "today" in natural or "tonight" in natural:
+            day = "TODAY"
+        if day:
+            scheduled = _handle_schedule_command(
+                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+                f"WEEK: {day} {hour}:{minute} {ampm} {action}",
+            )
+            if scheduled is not None:
+                return scheduled
+        return {
+            "ok": True,
+            "reply": f"Do you mean {action.lower()} today at {hour}:{minute} {ampm}?",
+        }
+
+    fan_natural = re.search(r"\bfan\b.*?\b(auto|low|medium|high)\b", natural)
+    if fan_natural:
+        command = f"FAN {fan_natural.group(1).upper()}"
+
+    temp_natural = re.search(
+        r"\b(?:make|set)(?:\s+(?:it|the ac|temperature))?\s+(?:to\s+)?(\d{2}(?:\.\d)?)\s*(?:degrees?|f)?\b",
+        natural,
+    )
+    if temp_natural and not re.search(r"\b(?:cool|heat|heating|cooling)\b", natural):
+        command = f"TEMP {temp_natural.group(1)}"
+
+    mode_only = re.search(r"\b(?:put|set|switch)(?:\s+(?:it|the ac))?\s+(?:to|on)?\s*(cool|heat|dry|fan|auto)\b", natural)
+    if mode_only and not re.search(r"\d{2}", natural):
+        mode = mode_only.group(1)
+        return _execute({"action": "set", "mode": mode}, f"MODE {mode.upper()}")
 
     off_phrases = ["turn it off", "turn off", "shut it off", "switch it off"]
     on_phrases = ["turn it on", "turn on", "switch it on"]
@@ -735,4 +957,8 @@ def process_text_command(raw: str) -> dict[str, Any]:
         payload = {"action": "set", "fan": fan.group(1).lower()}
         return _execute(payload, f"FAN {fan.group(1)}")
 
-    return {"ok": False, "reply": f"Unknown command. {HELP_TEXT}"}
+    ai_result = _ai_fallback(raw_text)
+    if ai_result is not None:
+        return ai_result
+
+    return {"ok": False, "reply": "I didn't understand that. Text HELP for examples, or say what you want in a different way."}
