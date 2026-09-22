@@ -308,37 +308,55 @@ def _handle_week_batch(raw_command: str) -> dict[str, Any] | None:
     parsed: list[dict[str, Any]] = []
     errors: list[str] = []
 
-    entry_re = re.compile(
-        r"^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{2}-\\d{2}-\\d{2})"
-        r"\\s*[:,-]?\\s+"
-        r"(\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM))"
-        r"\\s*(?:-|:|@)?\\s+(.+)$",
-        re.I,
-    )
-    time_only_re = re.compile(
-        r"^(\\d{1,2}(?::\\d{2})?\\s*(?:AM|PM))\\s*(?:-|:|@)?\\s+(.+)$",
-        re.I,
-    )
+    day_aliases = {
+        "TODAY", "TOMORROW",
+        "MON", "MONDAY", "TUE", "TUES", "TUESDAY", "WED", "WEDNESDAY",
+        "THU", "THUR", "THURS", "THURSDAY", "FRI", "FRIDAY",
+        "SAT", "SATURDAY", "SUN", "SUNDAY",
+    }
 
     last_day_text: str | None = None
     for idx, raw_part in enumerate(parts, 1):
-        part = re.sub(r"^\\s*(?:[-*•]+|\\d+[.)])\\s*", "", raw_part).strip()
+        part = raw_part.strip()
 
-        match = entry_re.fullmatch(part)
-        if match:
-            day_text = match.group(1)
-            time_text = match.group(2)
-            action_text = match.group(3)
-            last_day_text = day_text
-        else:
-            time_match = time_only_re.fullmatch(part)
-            if time_match and last_day_text:
-                day_text = last_day_text
-                time_text = time_match.group(1)
-                action_text = time_match.group(2)
-            else:
+        # Strip common list markers without depending on the schedule parser.
+        while part and part[0] in "-*•":
+            part = part[1:].lstrip()
+        first_token, sep, remainder = part.partition(" ")
+        if first_token.rstrip(".)").isdigit() and sep:
+            part = remainder.strip()
+
+        tokens = part.replace("@", " ").split()
+        if not tokens:
+            errors.append(f"{idx}: empty entry")
+            continue
+
+        first = tokens[0].strip(":,-").upper()
+        looks_like_iso_date = len(first) == 10 and first[4:5] == "-" and first[7:8] == "-"
+        has_day = first in day_aliases or looks_like_iso_date
+
+        if has_day:
+            if len(tokens) < 4:
                 errors.append(f"{idx}: couldn't read '{part[:45]}'")
                 continue
+            day_text = first
+            time_text = tokens[1].strip(":,-") + " " + tokens[2].strip(":,-")
+            action_tokens = tokens[3:]
+            last_day_text = day_text
+        else:
+            if last_day_text is None or len(tokens) < 3:
+                errors.append(f"{idx}: couldn't read '{part[:45]}'")
+                continue
+            day_text = last_day_text
+            time_text = tokens[0].strip(":,-") + " " + tokens[1].strip(":,-")
+            action_tokens = tokens[2:]
+
+        while action_tokens and action_tokens[0] in {"-", ":", "@"}:
+            action_tokens = action_tokens[1:]
+        action_text = " ".join(action_tokens).strip()
+        if not action_text:
+            errors.append(f"{idx}: missing action in '{part[:45]}'")
+            continue
 
         run_date = _resolve_week_date(day_text, tz)
         time_local = _parse_sms_time(time_text)
