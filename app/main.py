@@ -458,6 +458,11 @@ function extractVoiceCommand(body) {{
 }}
 
 function installNetHomeTrigger() {{
+  // Force Apps Script to request Gmail authorization before the REST API calls below.
+  // This harmless Gmail read makes the required Gmail scope part of this script automatically,
+  // so you do not need to edit appsscript.json by hand.
+  GmailApp.search('newer_than:1d', 0, 1);
+
   ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
   ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(1).create();
   pollGoogleVoice();
