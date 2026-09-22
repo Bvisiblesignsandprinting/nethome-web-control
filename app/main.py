@@ -437,10 +437,19 @@ function extractVoiceCommand(body) {{
   const lines = String(body || '').replace(/\\r/g, '').split('\\n')
     .map(s => s.trim()).filter(Boolean);
 
+  const footerStarts = (line) => {{
+    const s = String(line || '').trim();
+    if (/^to respond to this text message/i.test(s)) return true;
+    if (/^<https?:\\/\\/(?:support\\.google\\.com\\/voice|voice\\.google\\.com\\/settings)/i.test(s)) return true;
+    if (/^https?:\\/\\/(?:support\\.google\\.com\\/voice|voice\\.google\\.com\\/settings)/i.test(s)) return true;
+    if (/^email notifications for text messages/i.test(s)) return true;
+    if (/^if you.*emails in the future/i.test(s)) return true;
+    return false;
+  }};
+
   const isBoilerplate = (line) => {{
     if (/^<https?:\\/\\/[^>]+>$/.test(line)) return true;
     if (/^https?:\\/\\//i.test(line)) return true;
-    if (/^to respond to this text message/i.test(line)) return true;
     if (/^(google voice|your account|help center|help forum|google llc)/i.test(line)) return true;
     if (/^this email was sent to you/i.test(line)) return true;
     if (/^1600 amphitheatre/i.test(line)) return true;
@@ -451,7 +460,7 @@ function extractVoiceCommand(body) {{
 
   const useful = [];
   for (const line of lines) {{
-    if (/^to respond to this text message/i.test(line)) break;
+    if (footerStarts(line)) break;
     if (isBoilerplate(line)) continue;
     useful.push(line);
   }}
@@ -461,7 +470,8 @@ function extractVoiceCommand(body) {{
   // Preserve week schedules and split schedule fragments. Google Voice can
   // deliver one long phone text as several Gmail notifications.
   if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:/i.test(useful[0]) ||
-      /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{{2}}-\d{{2}}-\d{{2}})\s+/i.test(useful[0])) {{
+      /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{{2}}-\d{{2}}-\d{{2}})\s+/i.test(useful[0]) ||
+      /^\d{{1,2}}(?::\d{{2}})?\s*(?:AM|PM)\s+/i.test(useful[0])) {{
     return useful.join(' ; ');
   }}
 
