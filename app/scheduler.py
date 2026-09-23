@@ -1,13 +1,16 @@
 from __future__ import annotations
 
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
+import json
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import settings
 from .db import (
     add_activity,
+    claim_due_queued_execution,
     claim_schedule_execution,
+    enqueue_device_command_at,
     finish_schedule_execution,
     list_schedules,
     save_device_state,
@@ -185,6 +188,94 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             item["status"] = "failed"
             item["error"] = str(exc)
             summary["failed"] += 1
+
+        summary["executions"].append(item)
+
+    # Run ad-hoc SMS retry commands that became due. These use the existing
+    # schedule_executions table but are not visible as user schedules.
+    for _ in range(20):
+        queued = claim_due_queued_execution(now_utc)
+        if queued is None:
+            break
+
+        summary["due"] += 1
+        summary["claimed"] += 1
+        execution_id = int(queued["id"])
+        raw_command = queued.get("command") or {}
+        if isinstance(raw_command, str):
+            try:
+                raw_command = json.loads(raw_command)
+            except Exception:
+                raw_command = {}
+        command = dict(raw_command) if isinstance(raw_command, dict) else {}
+        retry_count = int(command.pop("_retry_count", 0) or 0)
+        retry_max = int(command.pop("_retry_max", 12) or 12)
+        retry_label = str(command.pop("_retry_label", "SMS command"))
+        item = {
+            "execution_id": execution_id,
+            "schedule_id": None,
+            "name": retry_label,
+            "scheduled_for": str(queued.get("scheduled_for") or ""),
+            "command": command,
+        }
+
+        if not settings.allow_writes:
+            finish_schedule_execution(
+                execution_id,
+                "skipped",
+                result={"reason": "writes_locked"},
+                error="AC writes are locked",
+            )
+            item["status"] = "skipped"
+            item["reason"] = "writes_locked"
+            summary["skipped"] += 1
+            summary["executions"].append(item)
+            continue
+
+        try:
+            result = midea.command(command)
+            save_device_state(result, True, source="cloud")
+            finish_schedule_execution(execution_id, "success", result=result)
+            add_activity(
+                "scheduler",
+                "sms_retry_execute",
+                "success",
+                f"execution_id={execution_id} retry={retry_count} verified={result.get('verified', False)}",
+            )
+            item["status"] = "success"
+            item["result"] = result
+            summary["success"] += 1
+        except Exception as exc:
+            text = str(exc).lower()
+            offline = "3123" in text or "offline" in text
+            finish_schedule_execution(execution_id, "failed", error=str(exc))
+            item["status"] = "failed"
+            item["error"] = str(exc)
+            summary["failed"] += 1
+
+            if offline and retry_count < retry_max:
+                next_command = {
+                    **command,
+                    "_retry_count": retry_count + 1,
+                    "_retry_max": retry_max,
+                    "_retry_label": retry_label,
+                }
+                next_at = now_utc + timedelta(minutes=5)
+                enqueue_device_command_at("sms-retry", next_command, next_at)
+                item["retry_scheduled_for"] = next_at.isoformat()
+                add_activity(
+                    "scheduler",
+                    "sms_retry_execute",
+                    "retry",
+                    f"execution_id={execution_id} next={next_at.isoformat()} retry={retry_count + 1}/{retry_max}",
+                )
+            else:
+                add_activity(
+                    "scheduler",
+                    "sms_retry_execute",
+                    "error",
+                    f"execution_id={execution_id} retry={retry_count}/{retry_max} error={exc}",
+                )
 
         summary["executions"].append(item)
 

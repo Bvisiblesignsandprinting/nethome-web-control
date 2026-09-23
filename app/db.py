@@ -665,9 +665,9 @@ def finish_schedule_execution(
         )
 
 
-def enqueue_device_command(source: str, command: dict[str, Any]) -> dict[str, Any]:
-    """Queue an immediate AC command for the always-on worker."""
-    scheduled_for = datetime.now(timezone.utc)
+def enqueue_device_command_at(source: str, command: dict[str, Any], scheduled_for: datetime) -> dict[str, Any]:
+    """Queue an AC command for execution at or after a UTC timestamp."""
+    scheduled_for = scheduled_for.astimezone(timezone.utc)
     if _use_postgres():
         from psycopg.types.json import Jsonb
         with _pg_conn() as conn, conn.cursor() as cur:
@@ -701,6 +701,70 @@ def enqueue_device_command(source: str, command: dict[str, Any]) -> dict[str, An
     result = dict(row)
     add_activity(source, "device_command_queued", "pending", f"execution_id={result['id']} command={command}")
     return result
+
+
+def enqueue_device_command(source: str, command: dict[str, Any]) -> dict[str, Any]:
+    """Queue an immediate AC command."""
+    return enqueue_device_command_at(source, command, datetime.now(timezone.utc))
+
+
+def claim_due_queued_execution(now_utc: datetime) -> dict[str, Any] | None:
+    """Atomically claim the oldest due ad-hoc command (schedule_id is null)."""
+    now_utc = now_utc.astimezone(timezone.utc)
+    executed_at = now_utc
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                select id
+                from public.schedule_executions
+                where schedule_id is null
+                  and status = 'pending'
+                  and scheduled_for <= %s
+                  and command ? '_retry_count'
+                order by scheduled_for, id
+                for update skip locked
+                limit 1
+                """,
+                (now_utc,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return None
+            execution_id = int(row["id"] if isinstance(row, dict) else row[0])
+            cur.execute(
+                """
+                update public.schedule_executions
+                set status = 'running', executed_at = %s
+                where id = %s
+                returning *
+                """,
+                (executed_at, execution_id),
+            )
+            return _normalize_row(cur.fetchone())
+
+    with _sqlite_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM schedule_executions
+            WHERE schedule_id IS NULL
+              AND status = 'pending'
+              AND scheduled_for <= ?
+              AND command LIKE '%"_retry_count"%'
+            ORDER BY scheduled_for, id
+            LIMIT 1
+            """,
+            (now_utc.isoformat(),),
+        ).fetchone()
+        if not row:
+            return None
+        execution_id = int(row["id"])
+        conn.execute(
+            "UPDATE schedule_executions SET status = 'running', executed_at = ? WHERE id = ? AND status = 'pending'",
+            (executed_at.isoformat(), execution_id),
+        )
+        claimed = conn.execute("SELECT * FROM schedule_executions WHERE id = ?", (execution_id,)).fetchone()
+    return dict(claimed) if claimed else None
 
 
 def claim_next_execution() -> dict[str, Any] | None:

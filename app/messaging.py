@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.request import Request as UrlRequest, urlopen
 from zoneinfo import ZoneInfo
@@ -12,6 +12,7 @@ from .db import (
     add_activity,
     create_schedule,
     delete_schedule,
+    enqueue_device_command_at,
     get_latest_device_state,
     list_schedules,
     save_device_state,
@@ -27,6 +28,8 @@ Try:
 • Make it 72°
 • Cool to 74°
 • Fan high
+• Swing up and down
+• Swing left and right
 • Weather tomorrow?
 • Best temperature tonight?
 • Show my schedule
@@ -70,6 +73,12 @@ def _status_reply(result: dict[str, Any]) -> str:
         lines.append(f"Room: {indoor}°F")
     if fan is not None:
         lines.append(f"Fan: {fan}%")
+    vertical = result.get("vertical_swing")
+    horizontal = result.get("horizontal_swing")
+    if vertical is not None or horizontal is not None:
+        v = "On" if vertical else "Off"
+        h = "On" if horizontal else "Off"
+        lines.append(f"Swing: ↕ {v} • ↔ {h}")
     return "\n".join(lines)
 
 
@@ -85,6 +94,21 @@ def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
         }
     except Exception as exc:
         add_activity("sms", "device_command", "error", f"{payload}: {exc}")
+        text = str(exc).lower()
+        if "3123" in text or "offline" in text:
+            retry_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+            retry_command = {
+                **payload,
+                "_retry_count": 1,
+                "_retry_max": 12,
+                "_retry_label": label,
+            }
+            enqueue_device_command_at("sms-retry", retry_command, retry_at)
+            return {
+                "ok": False,
+                "reply": "⚠️ AC is offline. I saved this command and will retry every 5 minutes for up to 1 hour.",
+                "retry_scheduled_for": retry_at.isoformat(),
+            }
         return {"ok": False, "reply": f"⚠️ {_short_error(exc)}"}
 
 
@@ -733,6 +757,9 @@ TEMP <50-90>
 COOL <50-90>
 HEAT <50-90>
 FAN AUTO|LOW|MEDIUM|HIGH
+SWING VERTICAL ON|OFF
+SWING HORIZONTAL ON|OFF
+SWING BOTH ON|OFF
 WEATHER
 WEATHER NOW
 WEATHER TOMORROW
@@ -760,6 +787,12 @@ Examples:
 "turn it on" -> ON
 "make it 72" -> TEMP 72
 "put it on cool at 72" -> COOL 72
+"swing up and down" -> SWING VERTICAL ON
+"stop the up and down swing" -> SWING VERTICAL OFF
+"swing left and right" -> SWING HORIZONTAL ON
+"stop the left and right swing" -> SWING HORIZONTAL OFF
+"swing both ways" -> SWING BOTH ON
+"stop swinging" -> SWING BOTH OFF
 "make it a little colder" -> clarify; ask whether to lower by 2F or use a specific temperature
 "weather tomorrow" -> WEATHER TOMORROW
 "what should I set it to tomorrow" -> WEATHER TOMORROW RECOMMEND
@@ -825,6 +858,7 @@ def _safe_ai_command(command: str) -> bool:
         r"(?:TEMP|SET|TEMPERATURE)\s+\d{2}(?:\.\d)?",
         r"(?:COOL|HEAT)\s+\d{2}(?:\.\d)?",
         r"FAN\s+(?:AUTO|LOW|MEDIUM|HIGH)",
+        r"SWING\s+(?:VERTICAL|HORIZONTAL|BOTH)\s+(?:ON|OFF)",
         r"WEATHER(?:\s+(?:NOW|TODAY|TOMORROW|MONDAY|TUESDAY|WEDNESDAY|THURSDAY|FRIDAY|SATURDAY|SUNDAY|WEEK))?(?:\s+RECOMMEND)?",
         r"WEATHER\s+[2-8]\s+DAYS?",
         r"SCHEDULES?",
@@ -1104,6 +1138,36 @@ def process_text_command(raw: str) -> dict[str, Any]:
         )
         if scheduled is not None:
             return scheduled
+
+    swing_command = None
+    if re.fullmatch(r"SWING\s+(VERTICAL|HORIZONTAL|BOTH)\s+(ON|OFF)", command):
+        swing_command = command
+    elif re.search(r"\b(?:stop|disable|turn off)\b.*?\b(?:swing|swinging)\b", natural):
+        if re.search(r"\b(?:up\s*(?:and|&)\s*down|up/down|up|down|vertical)\b", natural):
+            swing_command = "SWING VERTICAL OFF"
+        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|left/right|right/left|left|right|horizontal)\b", natural):
+            swing_command = "SWING HORIZONTAL OFF"
+        else:
+            swing_command = "SWING BOTH OFF"
+    elif re.search(r"\b(?:swing|swinging)\b", natural):
+        if re.search(r"\b(?:up\s*(?:and|&)\s*down|up/down|up|down|vertical)\b", natural):
+            swing_command = "SWING VERTICAL ON"
+        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|left/right|right/left|left|right|horizontal)\b", natural):
+            swing_command = "SWING HORIZONTAL ON"
+        elif re.search(r"\b(?:both|all directions|both ways)\b", natural):
+            swing_command = "SWING BOTH ON"
+
+    if swing_command:
+        direction, state = swing_command.split()[1:]
+        value = state == "ON"
+        if direction == "VERTICAL":
+            return _execute({"action": "set", "vertical_swing": value}, swing_command)
+        if direction == "HORIZONTAL":
+            return _execute({"action": "set", "horizontal_swing": value}, swing_command)
+        return _execute(
+            {"action": "set", "vertical_swing": value, "horizontal_swing": value},
+            swing_command,
+        )
 
     fan_natural = re.search(r"\bfan\b.*?\b(auto|low|medium|high)\b", natural)
     if fan_natural:
