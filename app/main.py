@@ -706,6 +706,7 @@ def device_command(body: DeviceCommand):
         )
         return {"ok": True, "verified": bool(result.get("verified")), "result": result}
     except Exception as exc:
+        print(f"[device_command] command={command} error={type(exc).__name__}: {exc}", flush=True)
         add_activity("web", "device_command", "error", f"command={command} error={exc}")
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
