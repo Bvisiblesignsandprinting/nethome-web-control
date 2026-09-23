@@ -294,6 +294,8 @@ class MideaClient:
             "requested_mode": requested_logical_mode,
             "requested_temperature_c": requested_c,
             "requested_running": bool(state.running) if action in {"on", "off"} or command.get("running") is not None else None,
+            "requested_horizontal_swing": bool(state.horizontal_swing) if command.get("horizontal_swing") is not None else None,
+            "requested_vertical_swing": bool(state.vertical_swing) if command.get("vertical_swing") is not None else None,
         }
 
     @staticmethod
@@ -318,6 +320,12 @@ class MideaClient:
                 if abs(float(state.get("target_temperature_c")) - float(expected["requested_temperature_c"])) > 0.6:
                     return False
             except Exception:
+                return False
+        if expected.get("requested_horizontal_swing") is not None:
+            if bool(state.get("horizontal_swing")) != bool(expected["requested_horizontal_swing"]):
+                return False
+        if expected.get("requested_vertical_swing") is not None:
+            if bool(state.get("vertical_swing")) != bool(expected["requested_vertical_swing"]):
                 return False
         return True
 
