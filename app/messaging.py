@@ -87,6 +87,24 @@ def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
         result = midea.command(payload)
         save_device_state(result, True, source="cloud")
         add_activity("sms", "device_command", "success", f"{label} verified={result.get('verified', False)}")
+        if result.get("verified") is False and result.get("verification_note"):
+            requested_c = result.get("requested_temperature_c")
+            requested_f = None
+            if requested_c is not None:
+                requested_f = round((float(requested_c) * 9.0 / 5.0) + 32.0)
+            requested_line = f"Requested: {label}" if label else (
+                f"Requested: {requested_f}°F" if requested_f is not None else "Requested change sent"
+            )
+            return {
+                "ok": True,
+                "reply": (
+                    f"✅ Command sent\n"
+                    f"{requested_line}\n"
+                    f"Cloud status is still catching up.\n"
+                    f"Last cloud reading:\n{_status_reply(result)}"
+                ),
+                "result": result,
+            }
         return {
             "ok": True,
             "reply": f"✅ Updated\n{_status_reply(result)}",
