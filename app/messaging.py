@@ -73,6 +73,12 @@ def _status_reply(result: dict[str, Any]) -> str:
         lines.append(f"Room: {indoor}°F")
     if fan is not None:
         lines.append(f"Fan: {fan}%")
+    vertical = result.get("vertical_swing")
+    horizontal = result.get("horizontal_swing")
+    if vertical is not None or horizontal is not None:
+        v = "On" if vertical else "Off"
+        h = "On" if horizontal else "Off"
+        lines.append(f"Swing: ↕ {v} • ↔ {h}")
     return "\n".join(lines)
 
 
@@ -1137,16 +1143,16 @@ def process_text_command(raw: str) -> dict[str, Any]:
     if re.fullmatch(r"SWING\s+(VERTICAL|HORIZONTAL|BOTH)\s+(ON|OFF)", command):
         swing_command = command
     elif re.search(r"\b(?:stop|disable|turn off)\b.*?\b(?:swing|swinging)\b", natural):
-        if re.search(r"\b(?:up\s*(?:and|&)\s*down|vertical)\b", natural):
+        if re.search(r"\b(?:up\s*(?:and|&)\s*down|up/down|up|down|vertical)\b", natural):
             swing_command = "SWING VERTICAL OFF"
-        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|horizontal)\b", natural):
+        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|left/right|right/left|left|right|horizontal)\b", natural):
             swing_command = "SWING HORIZONTAL OFF"
         else:
             swing_command = "SWING BOTH OFF"
     elif re.search(r"\b(?:swing|swinging)\b", natural):
-        if re.search(r"\b(?:up\s*(?:and|&)\s*down|vertical)\b", natural):
+        if re.search(r"\b(?:up\s*(?:and|&)\s*down|up/down|up|down|vertical)\b", natural):
             swing_command = "SWING VERTICAL ON"
-        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|horizontal)\b", natural):
+        elif re.search(r"\b(?:left\s*(?:and|&)\s*right|right\s*(?:and|&)\s*left|left/right|right/left|left|right|horizontal)\b", natural):
             swing_command = "SWING HORIZONTAL ON"
         elif re.search(r"\b(?:both|all directions|both ways)\b", natural):
             swing_command = "SWING BOTH ON"
