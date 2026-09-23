@@ -721,6 +721,7 @@ def claim_due_queued_execution(now_utc: datetime) -> dict[str, Any] | None:
                 where schedule_id is null
                   and status = 'pending'
                   and scheduled_for <= %s
+                  and command ? '_retry_count'
                 order by scheduled_for, id
                 for update skip locked
                 limit 1
@@ -749,6 +750,7 @@ def claim_due_queued_execution(now_utc: datetime) -> dict[str, Any] | None:
             WHERE schedule_id IS NULL
               AND status = 'pending'
               AND scheduled_for <= ?
+              AND command LIKE '%"_retry_count"%'
             ORDER BY scheduled_for, id
             LIMIT 1
             """,
