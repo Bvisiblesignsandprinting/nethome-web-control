@@ -44,6 +44,11 @@ class Settings:
     twilio_auth_token: str | None = os.getenv("TWILIO_AUTH_TOKEN") or None
     openai_api_key: str | None = os.getenv("OPENAI_API_KEY") or None
     openai_model: str = os.getenv("NETHOME_OPENAI_MODEL", "gpt-5.6-luna")
+    panel_firmware_version: str = os.getenv("NETHOME_PANEL_FIRMWARE_VERSION", "1.0.0")
+    panel_firmware_url: str | None = os.getenv("NETHOME_PANEL_FIRMWARE_URL") or None
+    panel_firmware_sha256: str | None = os.getenv("NETHOME_PANEL_FIRMWARE_SHA256") or None
+    panel_firmware_notes: str = os.getenv("NETHOME_PANEL_FIRMWARE_NOTES", "")
+    panel_config_json: str = os.getenv("NETHOME_PANEL_CONFIG_JSON", "{}")
 
 
 settings = Settings()
