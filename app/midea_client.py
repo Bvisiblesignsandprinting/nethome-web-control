@@ -337,6 +337,7 @@ class MideaClient:
 
         def operation(cloud):
             device = self._read_device(cloud)
+            before = self._state_dict(device)
             expected = self._apply_values(device, command)
 
             verified = None
@@ -385,6 +386,40 @@ class MideaClient:
                 if last_write_error is not None:
                     raise last_write_error
                 raise RuntimeError("AC state could not be verified after the command.")
+
+            # Midea cloud can briefly lag behind the indoor unit after a temperature
+            # write. If mode/power are correct and the target moved in the requested
+            # direction, treat the command as accepted-but-still-syncing rather than
+            # reporting a false failure.
+            requested_c = expected.get("requested_temperature_c")
+            if requested_c is not None:
+                try:
+                    before_c = float(before.get("target_temperature_c"))
+                    actual_c = float(verified.get("target_temperature_c"))
+                    request_down = requested_c < before_c - 0.1
+                    request_up = requested_c > before_c + 0.1
+                    moved_toward = (
+                        (request_down and actual_c < before_c - 0.1)
+                        or (request_up and actual_c > before_c + 0.1)
+                    )
+                    mode_ok = (
+                        expected.get("requested_mode") is None
+                        or int(verified.get("mode")) == int(expected["requested_mode"])
+                    )
+                    running_ok = (
+                        expected.get("requested_running") is None
+                        or bool(verified.get("running")) == bool(expected["requested_running"])
+                    )
+                    if moved_toward and mode_ok and running_ok:
+                        verified["action"] = expected["action"]
+                        verified["verified"] = False
+                        verified["requested_temperature_c"] = requested_c
+                        verified["verification_note"] = (
+                            "The indoor unit accepted the change, but Midea cloud is still updating the target temperature."
+                        )
+                        return verified
+                except Exception:
+                    pass
 
             actual_f = None
             target_c = verified.get("target_temperature_c")
