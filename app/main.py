@@ -96,6 +96,33 @@ class LoginRequest(BaseModel):
     password: str
 
 
+@app.get("/api/panel/firmware", dependencies=[Depends(access_auth)])
+def panel_firmware_manifest():
+    """Firmware metadata consumed by the dedicated ESP32 panel."""
+    return {
+        "available": bool(settings.panel_firmware_url),
+        "version": settings.panel_firmware_version,
+        "url": settings.panel_firmware_url,
+        "sha256": settings.panel_firmware_sha256,
+        "notes": settings.panel_firmware_notes,
+    }
+
+
+@app.get("/api/panel/config", dependencies=[Depends(access_auth)])
+def panel_remote_config():
+    """Server-controlled panel feature/configuration document."""
+    try:
+        payload = json.loads(settings.panel_config_json or "{}")
+    except json.JSONDecodeError:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return {
+        "ok": True,
+        "config": payload,
+    }
+
+
 class EmailTextRequest(BaseModel):
     text: str
     sender: str | None = None
