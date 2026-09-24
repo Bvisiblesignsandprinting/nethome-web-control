@@ -75,9 +75,9 @@ async function loadSmartControl(){
   const state=qs('#smart-control-state');
   try{
     const d=await jfetch('/api/smart-control');
-    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),cal=qs('#smart-control-calibration');
-    if(enabled)enabled.value=String(Boolean(d.enabled));if(target)target.value=d.target_temperature_f??72;if(cal)cal.value=d.sensor_calibration_f??0;
-    if(state){const sensor=d.sensor;state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH':'Sensor unavailable';state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');}
+    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
+    if(enabled)enabled.value=String(Boolean(d.enabled));if(target)target.value=d.target_temperature_f??72;if(cal)cal.value=d.sensor_calibration_f??0;if(deadband)deadband.value=d.deadband_f??1;if(interval)interval.value=d.min_command_interval_minutes??5;
+    if(state){const sensor=d.sensor;const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):'Sensor unavailable';state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');}
   }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
 }
 
@@ -88,9 +88,9 @@ async function saveSmartControl(){
     const enabled=qs('#smart-control-enabled')?.value==='true';
     const target=Number(qs('#smart-control-target')?.value);
     const calibration=Number(qs('#smart-control-calibration')?.value);
-    await jfetch('/api/smart-control/toggle',{method:'POST',body:JSON.stringify({enabled})});
-    await jfetch('/api/smart-control/target',{method:'POST',body:JSON.stringify({target_temperature_f:target})});
-    await jfetch('/api/smart-control/calibration',{method:'POST',body:JSON.stringify({sensor_calibration_f:calibration})});
+    const deadband=Number(qs('#smart-control-deadband')?.value);
+    const min_command_interval_minutes=Number(qs('#smart-control-interval')?.value);
+    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify({enabled,target_temperature:target,calibration_f:calibration,deadband_f:deadband,min_command_interval_minutes})});
     await loadSmartControl();
   }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}
 }
