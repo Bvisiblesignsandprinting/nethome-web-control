@@ -42,6 +42,7 @@ from .midea_client import midea
 from .messaging import process_text_command
 from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
+from .tuya_client import TuyaCloudError, tuya
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -686,6 +687,29 @@ def device_status():
             "offline": True,
             "error": str(exc)[:500],
             "source": "vercel-cloud",
+        }
+
+
+@app.get("/api/indoor-sensor", dependencies=[Depends(access_auth)])
+def indoor_sensor():
+    if not tuya.configured:
+        raise HTTPException(status_code=503, detail="Tuya indoor sensor is not configured")
+    try:
+        result = tuya.indoor_sensor()
+        add_activity(
+            "tuya",
+            "indoor_sensor",
+            "success",
+            f"temperature_f={result.get('temperature_f')} humidity={result.get('humidity')}",
+        )
+        return result
+    except TuyaCloudError as exc:
+        add_activity("tuya", "indoor_sensor", "error", str(exc)[:500])
+        return {
+            "ok": False,
+            "offline": True,
+            "error": str(exc)[:500],
+            "source": "tuya-cloud",
         }
 
 
