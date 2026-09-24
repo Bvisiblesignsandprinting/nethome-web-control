@@ -911,6 +911,10 @@ def smart_control_update(body: SmartControlUpdate):
         patch["target_temperature_f"] = body.target_temperature
     if body.calibration_f is not None:
         patch["sensor_calibration_f"] = body.calibration_f
+    if body.deadband_f is not None:
+        patch["deadband_f"] = body.deadband_f
+    if body.min_command_interval_minutes is not None:
+        patch["min_command_interval_minutes"] = body.min_command_interval_minutes
     config = save_smart_control_config(patch) if patch else load_smart_control_config()
     add_activity(
         "smart-control-config",
