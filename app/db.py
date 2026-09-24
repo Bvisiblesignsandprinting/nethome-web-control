@@ -341,6 +341,7 @@ def load_smart_control_config() -> dict[str, Any]:
         "sensor_calibration_f": 0.0,
         "deadband_f": 1.0,
         "min_command_interval_minutes": 5,
+        "preferred_mode": "auto",
         "last_command_at": None,
     }
     if _use_postgres():
