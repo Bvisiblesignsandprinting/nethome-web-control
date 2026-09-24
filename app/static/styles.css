@@ -102,3 +102,7 @@
 .ai-preview-item .sub{font-size:12px;color:#71858e;margin-top:3px}
 .ai-preview-command{font-size:13px;font-weight:850;color:#285f77;margin-top:5px}
 @media(max-width:620px){.schedule-ai-head{display:grid}.schedule-ai-controls{align-items:flex-start;flex-direction:column}.schedule-ai-controls button{width:100%}}
+
+.smart-setting-card .form-grid{align-items:end}
+.smart-setting-status{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.smart-setting-card .setting-icon{font-size:20px;font-weight:950}
