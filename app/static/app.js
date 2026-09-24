@@ -1,7 +1,7 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
 let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
-qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();}}));
+qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();loadSmartControl();}}));
 
 async function jfetch(url,options={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},credentials:'same-origin',...options});if(r.status===401){window.location.href='/login';throw new Error('Login required');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||`HTTP ${r.status}`);return data;}
 function cToF(c){return c==null||c===""?null:Math.round((Number(c)*9/5)+32);}
@@ -34,6 +34,67 @@ function updateBulkScheduleUI(){
   ['#bulk-enable','#bulk-disable','#bulk-delete','#bulk-clear'].forEach(id=>{const el=qs(id);if(el)el.disabled=count===0;});
   qsa('.schedule-item').forEach(item=>item.classList.toggle('selected',selectedScheduleIds.has(Number(item.dataset.id))));
 }
+let aiSchedulePreview=[];
+
+function aiSchedulePreviewMarkup(s,i){
+  const command=[s.action==='off'?'OFF':s.action==='on'?'ON':s.mode||'',s.temperature!=null?String(s.temperature)+'°F':'',s.fan?String(s.fan)+' fan':''].filter(Boolean).join(' · ');
+  return '<div class="ai-preview-row"><div><strong>'+(i+1)+'. '+esc(s.name||'Schedule')+'</strong><div class="sub">'+esc(recurrenceText(s))+' · '+esc(prettyTime(s.time_local))+'<br>'+esc(command)+'</div></div></div>';
+}
+
+async function previewAiSchedule(){
+  const prompt=qs('#schedule-ai-prompt')?.value.trim();
+  const state=qs('#schedule-ai-state'),results=qs('#schedule-ai-results'),btn=qs('#schedule-ai-preview');
+  if(!prompt){if(state)state.textContent='Enter a schedule request first';return;}
+  if(btn)btn.disabled=true;if(state)state.textContent='Building preview…';
+  try{
+    const d=await jfetch('/api/schedules/interpret',{method:'POST',body:JSON.stringify({prompt})});
+    aiSchedulePreview=d.schedules||[];
+    if(!results)return;
+    if(!aiSchedulePreview.length){results.innerHTML='<div class="empty">Add a clearer date, time, or action so I can build this safely.</div>';results.classList.remove('hidden');if(state)state.textContent='Needs more detail';return;}
+    results.innerHTML=aiSchedulePreview.map(aiSchedulePreviewMarkup).join('')+'<div class="ai-confirm-bar"><span>'+aiSchedulePreview.length+' schedule'+(aiSchedulePreview.length===1?'':'s')+' ready to save</span><button type="button" id="schedule-ai-confirm">Confirm and save</button><button type="button" id="schedule-ai-cancel" class="secondary">Cancel</button></div>';
+    results.classList.remove('hidden');
+    qs('#schedule-ai-confirm')?.addEventListener('click',saveAiSchedulePreview);
+    qs('#schedule-ai-cancel')?.addEventListener('click',()=>{aiSchedulePreview=[];results.classList.add('hidden');if(state)state.textContent='Cancelled';});
+    if(state)state.textContent='Review before saving';
+  }catch(e){if(state)state.textContent=e.message;}finally{if(btn)btn.disabled=false;}
+}
+
+async function saveAiSchedulePreview(){
+  const state=qs('#schedule-ai-state'),confirmBtn=qs('#schedule-ai-confirm');
+  if(confirmBtn)confirmBtn.disabled=true;
+  try{
+    for(const row of aiSchedulePreview)await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(row)});
+    const count=aiSchedulePreview.length;aiSchedulePreview=[];
+    qs('#schedule-ai-results')?.classList.add('hidden');
+    if(state)state.textContent='Saved '+count+' schedule'+(count===1?'':'s');
+    await loadSchedules();
+  }catch(e){if(state)state.textContent='Save failed: '+e.message;if(confirmBtn)confirmBtn.disabled=false;}
+}
+
+async function loadSmartControl(){
+  const state=qs('#smart-control-state');
+  try{
+    const d=await jfetch('/api/smart-control');
+    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),cal=qs('#smart-control-calibration');
+    if(enabled)enabled.value=String(Boolean(d.enabled));if(target)target.value=d.target_temperature_f??72;if(cal)cal.value=d.sensor_calibration_f??0;
+    if(state){const sensor=d.sensor;state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH':'Sensor unavailable';state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');}
+  }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
+}
+
+async function saveSmartControl(){
+  const state=qs('#smart-control-state'),btn=qs('#save-smart-control');
+  if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
+  try{
+    const enabled=qs('#smart-control-enabled')?.value==='true';
+    const target=Number(qs('#smart-control-target')?.value);
+    const calibration=Number(qs('#smart-control-calibration')?.value);
+    await jfetch('/api/smart-control/toggle',{method:'POST',body:JSON.stringify({enabled})});
+    await jfetch('/api/smart-control/target',{method:'POST',body:JSON.stringify({target_temperature_f:target})});
+    await jfetch('/api/smart-control/calibration',{method:'POST',body:JSON.stringify({sensor_calibration_f:calibration})});
+    await loadSmartControl();
+  }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}
+}
+
 async function loadSchedules(){
   const d=await jfetch('/api/schedules');
   schedulesCache=d.schedules;
