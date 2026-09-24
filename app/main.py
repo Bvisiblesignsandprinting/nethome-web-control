@@ -40,8 +40,10 @@ from .db import (
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .messaging import process_text_command
-from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
+from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, SchedulePromptRequest, ScheduleUpdate, SmartControlUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
+from .schedule_ai import interpret_schedule_prompt
+from .smart_control import run_smart_control, smart_control_snapshot, update_smart_config
 from .tuya_client import TuyaCloudError, tuya
 
 BASE = Path(__file__).resolve().parent
@@ -650,6 +652,10 @@ def health():
         "google_voice_bridge_configured": bool(
             load_google_voice_config().get("allowed_phone")
         ),
+        "tuya_sensor_configured": bool(
+            settings.tuya_client_id and settings.tuya_client_secret and settings.tuya_device_id
+        ),
+        "schedule_ai_configured": bool(settings.openai_api_key),
     }
 
 
@@ -713,6 +719,27 @@ def indoor_sensor():
         }
 
 
+@app.get("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_get():
+    """Return Smart Room Control settings plus the authoritative Tuya room reading."""
+    return smart_control_snapshot()
+
+
+@app.post("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_update(body: SmartControlUpdate):
+    changes = body.model_dump(exclude_none=True)
+    config = update_smart_config(changes)
+    add_activity(
+        "smart-control",
+        "settings_update",
+        "success",
+        "fields=" + ",".join(sorted(changes.keys())),
+    )
+    if config.get("enabled"):
+        return run_smart_control(force=True)
+    return smart_control_snapshot(config=config, status="disabled")
+
+
 @app.post("/api/device/command", dependencies=[Depends(access_auth)])
 def device_command(body: DeviceCommand):
     if not settings.allow_writes:
@@ -759,6 +786,12 @@ def worker_state(body: WorkerStateRequest):
 @app.get("/api/schedules", dependencies=[Depends(access_auth)])
 def schedules():
     return {"schedules": list_schedules()}
+
+
+@app.post("/api/schedules/interpret", dependencies=[Depends(access_auth)])
+def schedules_interpret(body: SchedulePromptRequest):
+    """Create a reviewable schedule preview from natural language; never saves it."""
+    return interpret_schedule_prompt(body.prompt)
 
 
 @app.post("/api/schedules", dependencies=[Depends(access_auth)])
