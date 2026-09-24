@@ -334,6 +334,76 @@ def save_google_voice_config(data: dict[str, Any]) -> None:
             (_now(), payload),
         )
 
+def load_smart_control_config() -> dict[str, Any]:
+    defaults = {
+        "enabled": False,
+        "target_temperature_f": 72.0,
+        "sensor_calibration_f": 0.0,
+        "deadband_f": 1.0,
+        "min_command_interval_minutes": 5,
+        "last_command_at": None,
+    }
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                """
+                select details
+                from public.activity
+                where source = 'smart-control-config' and action = 'settings' and result = 'active'
+                order by id desc
+                limit 1
+                """
+            )
+            row = _normalize_row(cur.fetchone())
+    else:
+        with _sqlite_conn() as conn:
+            raw = conn.execute(
+                """
+                select details
+                from activity
+                where source = 'smart-control-config' and action = 'settings' and result = 'active'
+                order by id desc
+                limit 1
+                """
+            ).fetchone()
+        row = dict(raw) if raw else None
+    if row:
+        try:
+            value = json.loads(row.get("details") or "{}")
+            if isinstance(value, dict):
+                defaults.update(value)
+        except Exception:
+            pass
+    return defaults
+
+
+def save_smart_control_config(data: dict[str, Any]) -> dict[str, Any]:
+    current = load_smart_control_config()
+    current.update(data)
+    payload = json.dumps(current, separators=(",", ":"))
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("delete from public.activity where source = 'smart-control-config' and action = 'settings'")
+            cur.execute(
+                """
+                insert into public.activity(source, action, result, details)
+                values ('smart-control-config', 'settings', 'active', %s)
+                """,
+                (payload,),
+            )
+    else:
+        with _sqlite_conn() as conn:
+            conn.execute("delete from activity where source = 'smart-control-config' and action = 'settings'")
+            conn.execute(
+                """
+                insert into activity(created_at, source, action, result, details)
+                values (?, 'smart-control-config', 'settings', 'active', ?)
+                """,
+                (_now(), payload),
+            )
+    return current
+
+
 def _ensure_schedule_columns(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(schedules)").fetchall()}
     additions = {
