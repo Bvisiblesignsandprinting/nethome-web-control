@@ -101,6 +101,8 @@ class SmartControlUpdate(BaseModel):
     enabled: bool | None = None
     target_temperature: float | None = Field(default=None, ge=50, le=90)
     calibration_f: float | None = Field(default=None, ge=-5, le=5)
+    deadband_f: float | None = Field(default=None, ge=0.5, le=5)
+    min_command_interval_minutes: int | None = Field(default=None, ge=1, le=30)
 
 
 class SchedulePromptRequest(BaseModel):
