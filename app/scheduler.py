@@ -13,10 +13,13 @@ from .db import (
     enqueue_device_command_at,
     finish_schedule_execution,
     list_schedules,
+    load_smart_control_config,
+    save_smart_control_config,
     save_device_state,
     update_schedule,
 )
 from .midea_client import midea
+from .tuya_client import TuyaCloudError, tuya
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -96,6 +99,101 @@ def _command_from_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
     if schedule.get("fan"):
         command["fan"] = str(schedule["fan"])
     return command
+
+
+def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
+    now_utc = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    config = load_smart_control_config()
+    result: dict[str, Any] = {
+        "enabled": bool(config.get("enabled")),
+        "checked_at": now_utc.isoformat(),
+        "action": "none",
+    }
+    if not result["enabled"]:
+        return result
+    if not settings.allow_writes:
+        result["action"] = "skipped"
+        result["reason"] = "writes_locked"
+        return result
+
+    try:
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=20)
+    except TuyaCloudError as exc:
+        add_activity("smart-control", "sensor", "error", str(exc)[:500])
+        result["action"] = "skipped"
+        result["reason"] = "sensor_unavailable"
+        return result
+
+    updated_at = sensor.get("updated_at")
+    if updated_at:
+        try:
+            sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+            if now_utc - sensor_time > timedelta(minutes=10):
+                result["action"] = "skipped"
+                result["reason"] = "sensor_stale"
+                return result
+        except Exception:
+            pass
+
+    room_f = float(sensor["temperature_f"]) + float(config.get("sensor_calibration_f") or 0)
+    target_f = float(config.get("target_temperature_f") or 72)
+    deadband_f = max(0.5, float(config.get("deadband_f") or 1.0))
+    result.update({"room_temperature_f": round(room_f, 1), "target_temperature_f": round(target_f, 1)})
+
+    error_f = target_f - room_f
+    if abs(error_f) <= deadband_f:
+        result["action"] = "hold"
+        return result
+
+    last_command_at = config.get("last_command_at")
+    min_minutes = max(1, int(config.get("min_command_interval_minutes") or 5))
+    if last_command_at:
+        try:
+            last_dt = datetime.fromisoformat(str(last_command_at).replace("Z", "+00:00")).astimezone(timezone.utc)
+            if now_utc - last_dt < timedelta(minutes=min_minutes):
+                result["action"] = "hold"
+                result["reason"] = "minimum_interval"
+                return result
+        except Exception:
+            pass
+
+    try:
+        state = midea.status()
+    except Exception as exc:
+        add_activity("smart-control", "status", "error", str(exc)[:500])
+        result["action"] = "skipped"
+        result["reason"] = "ac_unavailable"
+        return result
+
+    current_c = state.get("target_temperature_c")
+    current_set_f = (float(current_c) * 9.0 / 5.0 + 32.0) if current_c is not None else target_f
+    # External-sensor feedback correction. Limit each adjustment to 2F so the
+    # room converges smoothly without hunting or hammering the Midea cloud.
+    correction = max(-2.0, min(2.0, error_f))
+    next_set_f = max(60.0, min(86.0, round(current_set_f + correction)))
+    if abs(next_set_f - current_set_f) < 0.5:
+        result["action"] = "hold"
+        return result
+
+    command = {"action": "set", "temperature": next_set_f}
+    command_result = midea.command(command)
+    save_device_state(command_result, True, source="smart-control")
+    saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
+    add_activity(
+        "smart-control",
+        "adjust",
+        "success",
+        f"room={room_f:.1f} target={target_f:.1f} ac_set={current_set_f:.1f}->{next_set_f:.1f}",
+    )
+    result.update(
+        {
+            "action": "adjusted",
+            "midea_setpoint_f": next_set_f,
+            "verified": bool(command_result.get("verified")),
+            "last_command_at": saved.get("last_command_at"),
+        }
+    )
+    return result
 
 
 def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
@@ -279,4 +377,4 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
 
         summary["executions"].append(item)
 
-    return summary
+    summary["smart_control"] = run_smart_control(now_utc)\n    return summary
