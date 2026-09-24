@@ -124,6 +124,11 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         result["reason"] = "sensor_unavailable"
         return result
 
+    if sensor.get("online") is False:
+        result["action"] = "skipped"
+        result["reason"] = "sensor_offline"
+        return result
+
     updated_at = sensor.get("updated_at")
     if updated_at:
         try:
@@ -176,6 +181,8 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         return result
 
     command = {"action": "set", "temperature": next_set_f}
+    if not bool(state.get("running")):
+        command["running"] = True
     command_result = midea.command(command)
     save_device_state(command_result, True, source="smart-control")
     saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
@@ -259,14 +266,48 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             continue
 
         try:
-            result = midea.command(command)
-            save_device_state(result, True, source="cloud")
+            smart_config = load_smart_control_config()
+            smart_target_updated = False
+            cloud_command = dict(command)
+
+            # With Smart Room Control enabled, a schedule temperature is a ROOM
+            # target, not a raw Midea setpoint. Mode/fan still go to the AC.
+            if (
+                bool(smart_config.get("enabled"))
+                and str(schedule.get("action") or "set").lower() == "set"
+                and schedule.get("temperature") is not None
+            ):
+                save_smart_control_config(
+                    {
+                        "target_temperature_f": float(schedule["temperature"]),
+                        "last_command_at": None,
+                    }
+                )
+                smart_target_updated = True
+                cloud_command.pop("temperature", None)
+
+            # Do not send an empty SET just to persist a smart target.
+            actual_fields = {k: v for k, v in cloud_command.items() if k != "action" and v is not None}
+            if cloud_command.get("action") == "set" and not actual_fields:
+                result = {
+                    "verified": True,
+                    "smart_target_updated": smart_target_updated,
+                    "target_temperature_f": float(schedule["temperature"]),
+                }
+            else:
+                result = midea.command(cloud_command)
+                save_device_state(result, True, source="cloud")
+                if smart_target_updated:
+                    result = dict(result)
+                    result["smart_target_updated"] = True
+                    result["target_temperature_f"] = float(schedule["temperature"])
+
             finish_schedule_execution(execution_id, "success", result=result)
             add_activity(
                 "scheduler",
                 "schedule_execute",
                 "success",
-                f"schedule_id={schedule['id']} verified={result.get('verified', False)}",
+                f"schedule_id={schedule['id']} verified={result.get('verified', False)} smart_target={smart_target_updated}",
             )
 
             if (schedule.get("schedule_type") or "weekly") == "one_time":
