@@ -38,6 +38,10 @@ class Settings:
     weather_latitude: float = float(os.getenv("NETHOME_WEATHER_LATITUDE", "41.3318"))
     weather_longitude: float = float(os.getenv("NETHOME_WEATHER_LONGITUDE", "-74.1868"))
     weather_timezone: str = os.getenv("NETHOME_WEATHER_TIMEZONE", "America/New_York")
+    tuya_client_id: str | None = os.getenv("TUYA_CLIENT_ID") or None
+    tuya_client_secret: str | None = os.getenv("TUYA_CLIENT_SECRET") or None
+    tuya_device_id: str | None = os.getenv("TUYA_DEVICE_ID") or None
+    tuya_base_url: str = os.getenv("TUYA_BASE_URL", "https://openapi.tuyaus.com").rstrip("/")
     login_password: str | None = os.getenv("NETHOME_LOGIN_PASSWORD") or None
     account: str | None = os.getenv("NETHOME_ACCOUNT") or None
     password: str | None = os.getenv("NETHOME_PASSWORD") or None
