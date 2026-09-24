@@ -280,7 +280,7 @@ def run_smart_control(
 
     try:
         result_state = midea.command(command)
-        save_device_state(result_state, True, source="smart-control")
+        save_device_state(result_state, True, source="cloud")
         config["last_command_at"] = now_utc.isoformat()
         config["last_action"] = desired
         config["last_status"] = "command_sent"
