@@ -166,6 +166,8 @@ const smsSave=qs('#save-sms-config');if(smsSave)smsSave.addEventListener('click'
 const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click',copySmsWebhook);
 const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',saveGoogleVoiceConfig);
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
+qs('#schedule-ai-preview')?.addEventListener('click',previewAiSchedule);
+qs('#save-smart-control')?.addEventListener('click',saveSmartControl);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
 qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
