@@ -17,6 +17,7 @@ from .db import (
     update_schedule,
 )
 from .midea_client import midea
+from .smart_control import apply_schedule, run_smart_control
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -161,15 +162,26 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             continue
 
         try:
-            result = midea.command(command)
-            save_device_state(result, True, source="cloud")
+            smart_result = apply_schedule(schedule)
+            if smart_result is not None:
+                result = {"smart_control": smart_result}
+                add_activity(
+                    "scheduler",
+                    "schedule_execute",
+                    "success",
+                    f"schedule_id={schedule['id']} smart_room_control=true",
+                )
+            else:
+                result = midea.command(command)
+                save_device_state(result, True, source="cloud")
+                add_activity(
+                    "scheduler",
+                    "schedule_execute",
+                    "success",
+                    f"schedule_id={schedule['id']} verified={result.get('verified', False)}",
+                )
+
             finish_schedule_execution(execution_id, "success", result=result)
-            add_activity(
-                "scheduler",
-                "schedule_execute",
-                "success",
-                f"schedule_id={schedule['id']} verified={result.get('verified', False)}",
-            )
 
             if (schedule.get("schedule_type") or "weekly") == "one_time":
                 update_schedule(int(schedule["id"]), {"enabled": False})
@@ -279,4 +291,4 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
 
         summary["executions"].append(item)
 
-    return summary
+    try:\n        summary["smart_control"] = run_smart_control()\n    except Exception as exc:\n        add_activity("smart-control", "runner", "error", str(exc)[:500])\n        summary["smart_control"] = {"ok": False, "error": str(exc)[:300]}\n\n    return summary

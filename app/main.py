@@ -42,6 +42,8 @@ from .midea_client import midea
 from .messaging import process_text_command
 from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
 from .scheduler import run_due_schedules
+from .schedule_ai import preview_schedule_prompt
+from .smart_control import get_config as get_smart_config, run_smart_control, state_document as smart_state_document, update_config as update_smart_config
 from .tuya_client import TuyaCloudError, tuya
 
 BASE = Path(__file__).resolve().parent
@@ -95,6 +97,20 @@ def access_auth(
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class SmartControlUpdate(BaseModel):
+    enabled: bool | None = None
+    target_temperature: float | None = None
+    calibration_f: float | None = None
+    deadband_f: float | None = None
+    min_command_interval_minutes: int | None = None
+    preferred_mode: str | None = None
+    stale_after_minutes: int | None = None
+
+
+class ScheduleAiPreviewRequest(BaseModel):
+    prompt: str
 
 
 @app.get("/api/panel/firmware", dependencies=[Depends(access_auth)])
@@ -713,6 +729,42 @@ def indoor_sensor():
         }
 
 
+@app.get("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_status():
+    return smart_state_document(run_controller=False)
+
+
+@app.post("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_update(body: SmartControlUpdate):
+    changes = body.model_dump(exclude_none=True)
+    try:
+        config = update_smart_config(changes)
+        add_activity("smart-control-config", "updated", "success", f"fields={','.join(changes.keys())}")
+        result = smart_state_document(run_controller=False)
+        result["config"] = config
+        return result
+    except Exception as exc:
+        add_activity("smart-control-config", "updated", "error", str(exc)[:500])
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/api/smart-control/run", dependencies=[Depends(automation_auth)])
+def smart_control_run():
+    return run_smart_control()
+
+
+@app.post("/api/schedules/ai-preview", dependencies=[Depends(access_auth)])
+def schedules_ai_preview(body: ScheduleAiPreviewRequest):
+    prompt = body.prompt.strip()
+    if not prompt:
+        raise HTTPException(status_code=400, detail="Enter a schedule request.")
+    try:
+        return preview_schedule_prompt(prompt)
+    except Exception as exc:
+        add_activity("schedule-ai", "preview", "error", str(exc)[:500])
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 @app.post("/api/device/command", dependencies=[Depends(access_auth)])
 def device_command(body: DeviceCommand):
     if not settings.allow_writes:
@@ -792,7 +844,17 @@ def activity(limit: int = 50):
 
 @app.post("/api/automation/run", dependencies=[Depends(automation_auth)])
 def automation_run():
-    return run_due_schedules()
+    schedules_result = run_due_schedules()
+    try:
+        smart_result = run_smart_control()
+    except Exception as exc:
+        add_activity("smart-control", "automation_run", "error", str(exc)[:500])
+        smart_result = {"ok": False, "error": str(exc)[:500]}
+    return {
+        "ok": True,
+        "schedules": schedules_result,
+        "smart_control": smart_result,
+    }
 
 
 @app.post("/api/message/email", dependencies=[Depends(message_auth)])
