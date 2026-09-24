@@ -143,8 +143,11 @@ def smart_control_snapshot(
     elif sensor_status in {"sensor_offline", "sensor_stale"}:
         current_status = sensor_status
 
+    requested_enabled = bool(config.get("enabled"))
+    effective_enabled = requested_enabled and sensor_status not in {"sensor_offline", "sensor_stale"}
     public_config = {
-        "enabled": bool(config.get("enabled")),
+        "enabled": effective_enabled,
+        "requested_enabled": requested_enabled,
         "target_temperature": float(config.get("target_temperature") or 72.0),
         "calibration_f": float(config.get("calibration_f") or 0.0),
         "deadband_f": float(config.get("deadband_f") or 1.0),
