@@ -143,7 +143,14 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     room_f = float(sensor["temperature_f"]) + float(config.get("sensor_calibration_f") or 0)
     target_f = float(config.get("target_temperature_f") or 72)
     deadband_f = max(0.5, float(config.get("deadband_f") or 1.0))
-    result.update({"room_temperature_f": round(room_f, 1), "target_temperature_f": round(target_f, 1)})
+    preferred_mode = str(config.get("preferred_mode") or "auto").lower()
+    if preferred_mode not in {"auto", "cool", "heat"}:
+        preferred_mode = "auto"
+    result.update({
+        "room_temperature_f": round(room_f, 1),
+        "target_temperature_f": round(target_f, 1),
+        "preferred_mode": preferred_mode,
+    })
 
     error_f = target_f - room_f
     if abs(error_f) <= deadband_f:
@@ -172,17 +179,38 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     current_c = state.get("target_temperature_c")
     current_set_f = (float(current_c) * 9.0 / 5.0 + 32.0) if current_c is not None else target_f
+
+    # Decide which HVAC direction is allowed. In Auto, the external room
+    # sensor may choose Heat or Cool. In a fixed preference, do not wake the
+    # AC in the opposite direction just because the room crossed the target.
+    desired_mode = preferred_mode
+    if preferred_mode == "auto":
+        desired_mode = "heat" if error_f > 0 else "cool"
+    elif preferred_mode == "cool" and error_f > 0 and not bool(state.get("running")):
+        result["action"] = "hold"
+        result["reason"] = "cool_not_needed"
+        return result
+    elif preferred_mode == "heat" and error_f < 0 and not bool(state.get("running")):
+        result["action"] = "hold"
+        result["reason"] = "heat_not_needed"
+        return result
+
     # External-sensor feedback correction. Limit each adjustment to 2F so the
     # room converges smoothly without hunting or hammering the Midea cloud.
     correction = max(-2.0, min(2.0, error_f))
     next_set_f = max(60.0, min(86.0, round(current_set_f + correction)))
-    if abs(next_set_f - current_set_f) < 0.5:
+    current_mode = int(state.get("mode") or 0)
+    desired_mode_code = {"cool": 2, "heat": 4}.get(desired_mode, current_mode)
+    if abs(next_set_f - current_set_f) < 0.5 and current_mode == desired_mode_code:
         result["action"] = "hold"
         return result
 
-    command = {"action": "set", "temperature": next_set_f}
-    if not bool(state.get("running")):
-        command["running"] = True
+    command = {
+        "action": "set",
+        "temperature": next_set_f,
+        "mode": desired_mode,
+        "running": True,
+    }
     command_result = midea.command(command)
     save_device_state(command_result, True, source="smart-control")
     saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
@@ -196,6 +224,7 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         {
             "action": "adjusted",
             "midea_setpoint_f": next_set_f,
+            "midea_mode": desired_mode,
             "verified": bool(command_result.get("verified")),
             "last_command_at": saved.get("last_command_at"),
         }
