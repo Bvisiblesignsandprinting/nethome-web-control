@@ -17,7 +17,7 @@ from .db import (
     update_schedule,
 )
 from .midea_client import midea
-from .smart_control import apply_schedule
+from .smart_control import apply_schedule, run_smart_control
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -291,4 +291,4 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
 
         summary["executions"].append(item)
 
-    return summary
+    try:\n        summary["smart_control"] = run_smart_control()\n    except Exception as exc:\n        add_activity("smart-control", "runner", "error", str(exc)[:500])\n        summary["smart_control"] = {"ok": False, "error": str(exc)[:300]}\n\n    return summary
