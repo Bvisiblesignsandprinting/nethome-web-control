@@ -89,6 +89,28 @@
           <button id="add-schedule">+ New schedule</button>
         </div>
 
+        <div class="schedule-ai-card card">
+          <div class="schedule-ai-head">
+            <div>
+              <p class="eyebrow">SMART SCHEDULE BUILDER</p>
+              <h2>Describe the schedule you want</h2>
+              <p class="helper">Example: “Weekdays at 7 AM keep the room at 72°, and turn it off at 11 PM.” Nothing is saved until you review and confirm it.</p>
+            </div>
+            <span class="ai-badge">AI preview</span>
+          </div>
+          <textarea id="schedule-ai-prompt" rows="4" placeholder="Type your schedule in plain English..."></textarea>
+          <div class="schedule-ai-controls">
+            <button type="button" id="schedule-ai-preview-btn">Preview schedule</button>
+            <span id="schedule-ai-state" class="helper"></span>
+          </div>
+          <div id="schedule-ai-message" class="schedule-ai-message hidden"></div>
+          <div id="schedule-ai-preview-list" class="schedule-ai-preview-list hidden"></div>
+          <div id="schedule-ai-actions" class="form-actions hidden">
+            <button type="button" id="schedule-ai-clear" class="secondary">Clear preview</button>
+            <button type="button" id="schedule-ai-save">Save all schedules</button>
+          </div>
+        </div>
+
         <div id="schedule-bulk-bar" class="schedule-bulk-bar hidden">
           <label class="bulk-select-all"><input type="checkbox" id="schedule-select-all"> <span>Select all</span></label>
           <span id="schedule-selected-count" class="bulk-count">0 selected</span>
