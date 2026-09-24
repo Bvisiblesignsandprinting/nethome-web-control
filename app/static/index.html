@@ -89,6 +89,22 @@
           <button id="add-schedule">+ New schedule</button>
         </div>
 
+        <div class="card ai-schedule-card">
+          <div class="ai-schedule-head">
+            <div>
+              <p class="eyebrow">AI SCHEDULE BUILDER</p>
+              <h2>Describe the schedule you want</h2>
+              <p class="lede">Write it naturally. NetHome will build a preview first; nothing is saved until you confirm.</p>
+            </div>
+          </div>
+          <textarea id="schedule-ai-prompt" rows="4" placeholder="Example: Every weekday at 8 AM keep the room at 72°F on Cool with Auto fan, and turn it off at 10 PM."></textarea>
+          <div class="form-actions ai-schedule-actions">
+            <button type="button" id="schedule-ai-preview">Create preview</button>
+            <span id="schedule-ai-state" class="setting-state">Ready</span>
+          </div>
+          <div id="schedule-ai-results" class="ai-schedule-results hidden"></div>
+        </div>
+
         <div id="schedule-bulk-bar" class="schedule-bulk-bar hidden">
           <label class="bulk-select-all"><input type="checkbox" id="schedule-select-all"> <span>Select all</span></label>
           <span id="schedule-selected-count" class="bulk-count">0 selected</span>
@@ -192,6 +208,37 @@
       <section id="settings" class="view">
         <div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1>Settings</h1><p class="lede">Cloud control and direct text-message settings.</p></div></div>
         <div class="settings-grid">
+          <article class="card setting-card" style="grid-column:1/-1">
+            <div class="setting-icon">°</div>
+            <div style="width:100%">
+              <h2>Smart Room Control</h2>
+              <p>Use the Tuya room sensor as the true room temperature. NetHome automatically trims the Midea setpoint in the background to hold the room target without rapid command changes.</p>
+              <div class="form-grid three" style="margin-top:14px">
+                <label class="field">Smart control
+                  <select id="smart-control-enabled"><option value="false">Off</option><option value="true">On</option></select>
+                </label>
+                <label class="field">Room target
+                  <div class="input-suffix"><input id="smart-control-target" type="number" min="50" max="90" step="1"><span>°F</span></div>
+                </label>
+                <label class="field">Preferred mode
+                  <select id="smart-control-mode"><option value="auto">Auto</option><option value="cool">Cool only</option><option value="heat">Heat only</option></select>
+                </label>
+                <label class="field">Sensor calibration
+                  <div class="input-suffix"><input id="smart-control-calibration" type="number" min="-5" max="5" step="0.5"><span>°F</span></div>
+                </label>
+                <label class="field">Comfort deadband
+                  <div class="input-suffix"><input id="smart-control-deadband" type="number" min="0.5" max="5" step="0.5"><span>°F</span></div>
+                </label>
+                <label class="field">Minimum time between AC changes
+                  <div class="input-suffix"><input id="smart-control-interval" type="number" min="1" max="30" step="1"><span>min</span></div>
+                </label>
+              </div>
+              <div class="form-actions" style="justify-content:flex-start">
+                <button type="button" id="save-smart-control">Save smart control</button>
+                <span id="smart-control-state" class="setting-state">Loading…</span>
+              </div>
+            </div>
+          </article>
           <article class="card setting-card"><div class="setting-icon">☁</div><div><h2>NetHome Plus</h2><p>AC commands run directly through the hosted NetHome cloud connection. No computer worker is required.</p><span class="setting-state ok-text">Cloud connected</span></div></article>
           <article class="card setting-card"><div class="setting-icon">✓</div><div><h2>Current host</h2><p>GitHub → Vercel → Supabase → NetHome/Midea Cloud.</p><span class="setting-state ok-text">Hosted</span></div></article>
           <article class="card setting-card" style="grid-column:1/-1">
