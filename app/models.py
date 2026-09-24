@@ -83,3 +83,17 @@ class EmailBridgeConfigUpdate(BaseModel):
 class GoogleVoiceConfigUpdate(BaseModel):
     allowed_phone: str = Field(min_length=7, max_length=30)
     rotate_bridge_secret: bool = False
+
+
+class SmartControlUpdate(BaseModel):
+    enabled: bool | None = None
+    target_temperature: float | None = Field(default=None, ge=60, le=86)
+    calibration_f: float | None = Field(default=None, ge=-5, le=5)
+    deadband_f: float | None = Field(default=None, ge=0.5, le=3)
+    min_command_interval_minutes: int | None = Field(default=None, ge=3, le=30)
+    preferred_mode: Literal["auto", "cool", "heat"] | None = None
+    preferred_fan: Literal["auto", "low", "medium", "high"] | None = None
+
+
+class SchedulePromptRequest(BaseModel):
+    prompt: str = Field(min_length=3, max_length=4000)
