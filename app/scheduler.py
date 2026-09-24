@@ -418,4 +418,5 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
 
         summary["executions"].append(item)
 
-    summary["smart_control"] = run_smart_control(now_utc)\n    return summary
+    summary["smart_control"] = run_smart_control(now_utc)
+    return summary
