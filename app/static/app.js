@@ -1,7 +1,7 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
 let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let scheduleAiPreview=[];let smartState=null;let smartUpdateTimer=null;let smartUpdatePending={};let smartUpdateInFlight=false;let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
-qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();}}));
+qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();loadSmartControl();}}));
 
 async function jfetch(url,options={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},credentials:'same-origin',...options});if(r.status===401){window.location.href='/login';throw new Error('Login required');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||`HTTP ${r.status}`);return data;}
 function cToF(c){return c==null||c===""?null:Math.round((Number(c)*9/5)+32);}
@@ -18,6 +18,17 @@ function renderSmartState(d){
     const status=String(d.status||'active').replaceAll('_',' ');
     qs('#status-detail').textContent=`Smart Room Control · ${status} · target ${Math.round(Number(d.config.target_temperature))}°F`;
   }
+  const enabled=qs('#smart-enabled'),target=qs('#smart-target'),cal=qs('#smart-calibration'),dead=qs('#smart-deadband'),interval=qs('#smart-interval'),mode=qs('#smart-mode');
+  if(enabled)enabled.value=String(Boolean(d.config.requested_enabled??d.config.enabled));
+  if(target)target.value=String(d.config.target_temperature??72);
+  if(cal)cal.value=String(d.config.calibration_f??0);
+  if(dead)dead.value=String(d.config.deadband_f??1);
+  if(interval)interval.value=String(d.config.min_command_interval_minutes??5);
+  if(mode)mode.value=String(d.config.preferred_mode||'auto');
+  const sensorState=qs('#smart-sensor-state'),roomReading=qs('#smart-room-reading'),state=qs('#smart-control-state');
+  if(sensorState){const live=Boolean(d.sensor?.online!==false)&&!['sensor_offline','sensor_stale'].includes(String(d.status));sensorState.textContent=live?'Sensor live':String(d.status||'Sensor unavailable').replaceAll('_',' ');sensorState.className=`setting-state ${live?'ok-text':'warning'}`;}
+  if(roomReading)roomReading.textContent=Number.isFinite(room)?`Room ${room.toFixed(1)}°F · RH ${d.sensor?.humidity??'--'}%`:'Room --°F';
+  if(state){state.textContent=d.config.enabled?'Smart control active':(d.config.requested_enabled?'Waiting for fresh sensor':'Manual control');state.className=`setting-state ${d.config.enabled?'ok-text':'warning'}`;}
 }
 async function loadSmartControl(){
   try{renderSmartState(await jfetch('/api/smart-control'));}catch(_){}
@@ -35,6 +46,22 @@ function queueSmartWebUpdate(changes){
   if(smartState?.config)smartState={...smartState,config:{...smartState.config,...changes}};
   clearTimeout(smartUpdateTimer);
   smartUpdateTimer=setTimeout(flushSmartWebUpdate,700);
+}
+
+async function saveSmartControlSettings(){
+  const btn=qs('#save-smart-control'),state=qs('#smart-control-state');
+  const payload={
+    enabled:qs('#smart-enabled')?.value==='true',
+    target_temperature:Number(qs('#smart-target')?.value||72),
+    calibration_f:Number(qs('#smart-calibration')?.value||0),
+    deadband_f:Number(qs('#smart-deadband')?.value||1),
+    min_command_interval_minutes:Number(qs('#smart-interval')?.value||5),
+    preferred_mode:String(qs('#smart-mode')?.value||'auto')
+  };
+  if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
+  try{renderSmartState(await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify(payload)}));}
+  catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
+  finally{if(btn)btn.disabled=false;}
 }
 
 function loadCachedStatus(){try{const raw=localStorage.getItem('nethome:lastStatus');if(raw)renderStatus(JSON.parse(raw),{cached:true});}catch(_){}}
@@ -192,6 +219,7 @@ qs('#eco-btn').addEventListener('click',()=>toggleFeature('eco_mode','#eco-btn',
 qs('#boost-btn').addEventListener('click',()=>toggleFeature('turbo','#boost-btn','Boost'));
 qs('#sleep-btn').addEventListener('click',()=>toggleFeature('comfort_sleep','#sleep-btn','Sleep'));
 qs('#refresh-status').addEventListener('click',refreshStatus);qs('#refresh-activity').addEventListener('click',loadActivity);
+const smartSave=qs('#save-smart-control');if(smartSave)smartSave.addEventListener('click',saveSmartControlSettings);
 const smsSave=qs('#save-sms-config');if(smsSave)smsSave.addEventListener('click',saveSmsConfig);
 const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click',copySmsWebhook);
 const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',saveGoogleVoiceConfig);
