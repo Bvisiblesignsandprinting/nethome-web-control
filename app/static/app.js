@@ -1,5 +1,5 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
-let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
+let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let scheduleAiPreview=[];let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
 qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();}}));
 
@@ -34,6 +34,68 @@ function updateBulkScheduleUI(){
   ['#bulk-enable','#bulk-disable','#bulk-delete','#bulk-clear'].forEach(id=>{const el=qs(id);if(el)el.disabled=count===0;});
   qsa('.schedule-item').forEach(item=>item.classList.toggle('selected',selectedScheduleIds.has(Number(item.dataset.id))));
 }
+function aiScheduleActionText(s){
+  const action=String(s.action||'set').toLowerCase();
+  if(action==='off')return'Turn off';
+  if(action==='on')return'Turn on';
+  return [String(s.mode||'auto').toUpperCase(),s.temperature!=null?`${s.temperature}° room target`:'',s.fan?`${s.fan} fan`:''].filter(Boolean).join(' · ');
+}
+function aiSchedulePreviewMarkup(s,index){
+  return `<div class="ai-preview-item"><div class="ai-preview-number">${index+1}</div><div><strong>${esc(s.name||`Schedule ${index+1}`)}</strong><div class="sub">${esc(prettyTime(s.time_local))} · ${esc(recurrenceText(s))}</div><div class="ai-preview-command">${esc(aiScheduleActionText(s))}</div></div></div>`;
+}
+function clearScheduleAiPreview(){
+  scheduleAiPreview=[];
+  const list=qs('#schedule-ai-preview-list'),actions=qs('#schedule-ai-actions'),message=qs('#schedule-ai-message'),state=qs('#schedule-ai-state');
+  if(list){list.innerHTML='';list.classList.add('hidden');}
+  if(actions)actions.classList.add('hidden');
+  if(message){message.textContent='';message.classList.add('hidden');}
+  if(state)state.textContent='';
+}
+async function previewSchedulePrompt(){
+  const input=qs('#schedule-ai-prompt'),btn=qs('#schedule-ai-preview-btn'),state=qs('#schedule-ai-state'),message=qs('#schedule-ai-message');
+  const prompt=String(input?.value||'').trim();
+  if(!prompt){if(state)state.textContent='Type the schedule you want first.';return;}
+  if(btn)btn.disabled=true;
+  if(state)state.textContent='Building a preview…';
+  clearScheduleAiPreview();
+  if(state)state.textContent='Building a preview…';
+  try{
+    const d=await jfetch('/api/schedules/interpret',{method:'POST',body:JSON.stringify({prompt})});
+    if(d.needs_clarification||!Array.isArray(d.schedules)||!d.schedules.length){
+      if(message){message.textContent=d.message||'Please add the missing date, time, or temperature.';message.classList.remove('hidden');}
+      if(state)state.textContent='Needs one more detail';
+      return;
+    }
+    scheduleAiPreview=d.schedules;
+    const list=qs('#schedule-ai-preview-list'),actions=qs('#schedule-ai-actions');
+    if(list){list.innerHTML=scheduleAiPreview.map(aiSchedulePreviewMarkup).join('');list.classList.remove('hidden');}
+    if(actions)actions.classList.remove('hidden');
+    if(message&&d.message){message.textContent=d.message;message.classList.remove('hidden');}
+    if(state)state.textContent=`${scheduleAiPreview.length} schedule${scheduleAiPreview.length===1?'':'s'} ready to review`;
+  }catch(err){
+    if(message){message.textContent=err.message;message.classList.remove('hidden');}
+    if(state)state.textContent='Preview failed';
+  }finally{if(btn)btn.disabled=false;}
+}
+async function saveScheduleAiPreview(){
+  if(!scheduleAiPreview.length)return;
+  const btn=qs('#schedule-ai-save'),state=qs('#schedule-ai-state');
+  if(btn){btn.disabled=true;btn.textContent='Saving…';}
+  if(state)state.textContent='Saving reviewed schedules…';
+  try{
+    for(const schedule of scheduleAiPreview){
+      await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(schedule)});
+    }
+    const count=scheduleAiPreview.length;
+    clearScheduleAiPreview();
+    const input=qs('#schedule-ai-prompt');if(input)input.value='';
+    if(state)state.textContent=`Saved ${count} schedule${count===1?'':'s'}`;
+    await loadSchedules();
+  }catch(err){
+    if(state)state.textContent=`Save failed: ${err.message}`;
+  }finally{if(btn){btn.disabled=false;btn.textContent='Save all schedules';}}
+}
+
 async function loadSchedules(){
   const d=await jfetch('/api/schedules');
   schedulesCache=d.schedules;
@@ -105,6 +167,9 @@ const smsSave=qs('#save-sms-config');if(smsSave)smsSave.addEventListener('click'
 const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click',copySmsWebhook);
 const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',saveGoogleVoiceConfig);
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
+const aiPreviewBtn=qs('#schedule-ai-preview-btn');if(aiPreviewBtn)aiPreviewBtn.addEventListener('click',previewSchedulePrompt);
+const aiClearBtn=qs('#schedule-ai-clear');if(aiClearBtn)aiClearBtn.addEventListener('click',clearScheduleAiPreview);
+const aiSaveBtn=qs('#schedule-ai-save');if(aiSaveBtn)aiSaveBtn.addEventListener('click',saveScheduleAiPreview);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
 qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
