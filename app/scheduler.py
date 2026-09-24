@@ -306,14 +306,34 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 and str(schedule.get("action") or "set").lower() == "set"
                 and schedule.get("temperature") is not None
             ):
-                save_smart_control_config(
-                    {
-                        "target_temperature_f": float(schedule["temperature"]),
-                        "last_command_at": None,
-                    }
-                )
-                smart_target_updated = True
-                cloud_command.pop("temperature", None)
+                # Only convert the schedule temperature into a room target when
+                # the external sensor is currently trustworthy. If Tuya is
+                # offline/stale, fall back to the normal Midea schedule
+                # temperature instead of acting on old room data.
+                sensor_ready = False
+                try:
+                    sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+                    if sensor and sensor.get("ok") and sensor.get("online") is not False:
+                        updated_at = sensor.get("updated_at")
+                        if updated_at:
+                            sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+                            if sensor_time.tzinfo is None:
+                                sensor_time = sensor_time.replace(tzinfo=timezone.utc)
+                            sensor_ready = (now_utc - sensor_time.astimezone(timezone.utc)) <= timedelta(minutes=10)
+                        else:
+                            sensor_ready = True
+                except Exception:
+                    sensor_ready = False
+
+                if sensor_ready:
+                    save_smart_control_config(
+                        {
+                            "target_temperature_f": float(schedule["temperature"]),
+                            "last_command_at": None,
+                        }
+                    )
+                    smart_target_updated = True
+                    cloud_command.pop("temperature", None)
 
             # Do not send an empty SET just to persist a smart target.
             actual_fields = {k: v for k, v in cloud_command.items() if k != "action" and v is not None}
