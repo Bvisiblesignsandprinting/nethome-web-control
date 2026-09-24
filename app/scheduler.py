@@ -17,6 +17,7 @@ from .db import (
     update_schedule,
 )
 from .midea_client import midea
+from .smart_control import get_smart_config, run_smart_control, update_smart_config
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -161,20 +162,57 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             continue
 
         try:
-            result = midea.command(command)
-            save_device_state(result, True, source="cloud")
+            action = str(schedule.get("action") or "set").lower()
+            mode = str(schedule.get("mode") or "").lower()
+            smart_execution = False
+
+            # In v1.4 a normal temperature schedule represents desired ROOM
+            # temperature. Cool/Heat/Auto schedules therefore drive the external
+            # Tuya thermostat loop instead of treating the number as the Midea
+            # head-unit setpoint.
+            if (
+                action == "set"
+                and schedule.get("temperature") is not None
+                and mode in {"", "auto", "cool", "heat"}
+            ):
+                changes: dict[str, Any] = {
+                    "enabled": True,
+                    "target_temperature": float(schedule["temperature"]),
+                }
+                if mode in {"auto", "cool", "heat"}:
+                    changes["preferred_mode"] = mode
+                fan = str(schedule.get("fan") or "").lower()
+                if fan in {"auto", "low", "medium", "high"}:
+                    changes["preferred_fan"] = fan
+                update_smart_config(changes)
+                result = run_smart_control(now_utc, force=True)
+                smart_execution = True
+            elif action == "on":
+                update_smart_config({"enabled": True})
+                result = run_smart_control(now_utc, force=True)
+                smart_execution = True
+            else:
+                if action == "off" or mode in {"dry", "fan"}:
+                    update_smart_config({"enabled": False})
+                result = midea.command(command)
+                save_device_state(result, True, source="cloud")
+
             finish_schedule_execution(execution_id, "success", result=result)
             add_activity(
                 "scheduler",
                 "schedule_execute",
                 "success",
-                f"schedule_id={schedule['id']} verified={result.get('verified', False)}",
+                (
+                    f"schedule_id={schedule['id']} smart={smart_execution} "
+                    f"verified={result.get('verified', False) if isinstance(result, dict) else False}"
+                ),
             )
 
             if (schedule.get("schedule_type") or "weekly") == "one_time":
                 update_schedule(int(schedule["id"]), {"enabled": False})
 
             item["status"] = "success"
+            item["smart_control"] = smart_execution
             item["result"] = result
             summary["success"] += 1
         except Exception as exc:
@@ -278,5 +316,21 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 )
 
         summary["executions"].append(item)
+
+    # Smart Room Control is a thermostat heartbeat, not a visible user
+    # schedule. The existing once-per-minute Supabase cron is therefore enough
+    # to keep the external room sensor in charge even when the panel is locked
+    # or offline.
+    try:
+        smart_result = run_smart_control(now_utc)
+        summary["smart_control"] = {
+            "ok": bool(smart_result.get("ok")),
+            "status": smart_result.get("status"),
+            "room_temperature_f": smart_result.get("room_temperature_f"),
+            "target_temperature": (smart_result.get("config") or {}).get("target_temperature"),
+        }
+    except Exception as exc:
+        add_activity("smart-control", "heartbeat", "error", str(exc)[:500])
+        summary["smart_control"] = {"ok": False, "status": "error", "error": str(exc)[:300]}
 
     return summary
