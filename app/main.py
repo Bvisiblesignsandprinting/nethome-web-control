@@ -54,6 +54,7 @@ from .models import (
     SmartControlCalibration,
     SmartControlTarget,
     SmartControlToggle,
+    SmartControlUpdate,
     SmsConfigUpdate,
 )
 from .scheduler import run_due_schedules
@@ -879,7 +880,55 @@ def smart_control_status():
         sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
     except Exception:
         sensor = None
-    return {**config, "sensor": sensor}
+
+    panel_config = {
+        "enabled": bool(config.get("enabled")),
+        "target_temperature": float(config.get("target_temperature_f") or 72.0),
+        "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
+        "deadband_f": float(config.get("deadband_f") or 1.0),
+        "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
+        "last_command_at": config.get("last_command_at"),
+    }
+    return {
+        "ok": True,
+        "config": panel_config,
+        "enabled": panel_config["enabled"],
+        "target_temperature_f": panel_config["target_temperature"],
+        "sensor_calibration_f": panel_config["calibration_f"],
+        "deadband_f": panel_config["deadband_f"],
+        "min_command_interval_minutes": panel_config["min_command_interval_minutes"],
+        "last_command_at": panel_config["last_command_at"],
+        "sensor": sensor,
+    }
+
+
+@app.post("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_update(body: SmartControlUpdate):
+    patch = {}
+    if body.enabled is not None:
+        patch["enabled"] = body.enabled
+    if body.target_temperature is not None:
+        patch["target_temperature_f"] = body.target_temperature
+    if body.calibration_f is not None:
+        patch["sensor_calibration_f"] = body.calibration_f
+    config = save_smart_control_config(patch) if patch else load_smart_control_config()
+    add_activity(
+        "smart-control-config",
+        "update",
+        "success",
+        f"enabled={config.get('enabled')} target={config.get('target_temperature_f')} calibration={config.get('sensor_calibration_f')}",
+    )
+    return {
+        "ok": True,
+        "config": {
+            "enabled": bool(config.get("enabled")),
+            "target_temperature": float(config.get("target_temperature_f") or 72.0),
+            "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
+            "deadband_f": float(config.get("deadband_f") or 1.0),
+            "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
+            "last_command_at": config.get("last_command_at"),
+        },
+    }
 
 
 @app.post("/api/smart-control/toggle", dependencies=[Depends(access_auth)])
