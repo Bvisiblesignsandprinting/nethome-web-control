@@ -97,5 +97,11 @@ class SmartControlCalibration(BaseModel):
     sensor_calibration_f: float = Field(ge=-5, le=5)
 
 
+class SmartControlUpdate(BaseModel):
+    enabled: bool | None = None
+    target_temperature: float | None = Field(default=None, ge=50, le=90)
+    calibration_f: float | None = Field(default=None, ge=-5, le=5)
+
+
 class SchedulePromptRequest(BaseModel):
     prompt: str = Field(min_length=3, max_length=4000)
