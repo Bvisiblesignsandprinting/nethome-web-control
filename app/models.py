@@ -83,3 +83,19 @@ class EmailBridgeConfigUpdate(BaseModel):
 class GoogleVoiceConfigUpdate(BaseModel):
     allowed_phone: str = Field(min_length=7, max_length=30)
     rotate_bridge_secret: bool = False
+
+
+class SmartControlToggle(BaseModel):
+    enabled: bool
+
+
+class SmartControlTarget(BaseModel):
+    target_temperature_f: float = Field(ge=50, le=90)
+
+
+class SmartControlCalibration(BaseModel):
+    sensor_calibration_f: float = Field(ge=-5, le=5)
+
+
+class SchedulePromptRequest(BaseModel):
+    prompt: str = Field(min_length=3, max_length=4000)
