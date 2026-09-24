@@ -1,7 +1,7 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
 let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
-qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();}}));
+qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();loadSmartControl();}}));
 
 async function jfetch(url,options={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},credentials:'same-origin',...options});if(r.status===401){window.location.href='/login';throw new Error('Login required');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||`HTTP ${r.status}`);return data;}
 function cToF(c){return c==null||c===""?null:Math.round((Number(c)*9/5)+32);}
@@ -59,6 +59,41 @@ async function loadSmsConfig(){const state=qs('#sms-config-state');try{const d=a
 async function saveSmsConfig(){const phone=qs('#sms-allowed-from'),state=qs('#sms-config-state'),btn=qs('#save-sms-config');if(!phone)return;if(btn)btn.disabled=true;if(state)state.textContent='Saving…';try{const d=await jfetch('/api/sms/config',{method:'POST',body:JSON.stringify({allowed_from:phone.value})});phone.value=d.allowed_from||phone.value;const url=qs('#sms-webhook-url');if(url)url.value=d.webhook_url||'';if(state){state.textContent='Ready for Twilio';state.className='setting-state ok-text';}}catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}}
 async function copySmsWebhook(){const el=qs('#sms-webhook-url');if(!el||!el.value)return;try{await navigator.clipboard.writeText(el.value);const state=qs('#sms-config-state');if(state){state.textContent='Webhook copied';state.className='setting-state ok-text';}}catch(_){el.select();document.execCommand('copy');}}
 
+async function loadSmartControl(){
+  const state=qs('#smart-control-state');
+  try{
+    const d=await jfetch('/api/smart-control');
+    const c=d.config||{},sensor=d.sensor||{};
+    const enabled=qs('#smart-enabled');if(enabled)enabled.checked=Boolean(c.enabled);
+    const target=qs('#smart-target');if(target)target.value=c.target_temperature??72;
+    const mode=qs('#smart-mode');if(mode)mode.value=c.preferred_mode||'auto';
+    const cal=qs('#smart-calibration');if(cal)cal.value=c.calibration_f??0;
+    const db=qs('#smart-deadband');if(db)db.value=c.deadband_f??1;
+    const min=qs('#smart-min-interval');if(min)min.value=String(c.min_command_interval_minutes??5);
+    const room=qs('#smart-room-temp');if(room)room.textContent=d.room_temperature_f!=null?Math.round(d.room_temperature_f)+'°':'--°';
+    const td=qs('#smart-target-display');if(td)td.textContent=Math.round(c.target_temperature??72)+'°';
+    const hum=qs('#smart-humidity');if(hum)hum.textContent=sensor.humidity!=null?Math.round(sensor.humidity)+'%':'--%';
+    const ss=qs('#smart-sensor-state');if(ss)ss.textContent=sensor.online?'Online':(sensor.stale?'Stale':'Offline');
+    if(state){state.textContent=c.enabled?'Smart Control active':'Smart Control off';state.className='setting-state '+(c.enabled?'ok-text':'');}
+    if(d.room_temperature_f!=null){qs('#indoor-temp').textContent='Indoor '+Math.round(d.room_temperature_f)+'°F';}
+  }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
+}
+async function saveSmartControl(){
+  const btn=qs('#save-smart-control'),state=qs('#smart-control-state');
+  if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
+  const payload={
+    enabled:Boolean(qs('#smart-enabled')?.checked),
+    target_temperature:Number(qs('#smart-target')?.value||72),
+    preferred_mode:qs('#smart-mode')?.value||'auto',
+    calibration_f:Number(qs('#smart-calibration')?.value||0),
+    deadband_f:Number(qs('#smart-deadband')?.value||1),
+    min_command_interval_minutes:Number(qs('#smart-min-interval')?.value||5)
+  };
+  try{await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify(payload)});await loadSmartControl();}
+  catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
+  finally{if(btn)btn.disabled=false;}
+}
+
 async function loadGoogleVoiceConfig(){const state=qs('#gv-config-state');try{const d=await jfetch('/api/google-voice/config');const phone=qs('#gv-allowed-phone'),script=qs('#gv-apps-script');if(phone)phone.value=d.allowed_phone||'';if(script)script.value=d.apps_script||'';if(state){state.textContent=d.ready?'Ready — copy the script':'Save your mobile number';state.className=`setting-state ${d.ready?'ok-text':'warning'}`;}}catch(e){if(state){state.textContent='Unable to load Google Voice setup';state.className='setting-state warning';}}}
 async function saveGoogleVoiceConfig(){const phone=qs('#gv-allowed-phone'),state=qs('#gv-config-state'),btn=qs('#save-gv-config');if(!phone)return;if(btn)btn.disabled=true;if(state)state.textContent='Saving…';try{const d=await jfetch('/api/google-voice/config',{method:'POST',body:JSON.stringify({allowed_phone:phone.value})});phone.value=d.allowed_phone||phone.value;const script=qs('#gv-apps-script');if(script)script.value=d.apps_script||'';if(state){state.textContent='Ready — copy the script';state.className='setting-state ok-text';}}catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}}
 async function copyGoogleVoiceScript(){const el=qs('#gv-apps-script');if(!el||!el.value)return;try{await navigator.clipboard.writeText(el.value);const state=qs('#gv-config-state');if(state){state.textContent='Apps Script copied';state.className='setting-state ok-text';}}catch(_){el.select();document.execCommand('copy');}}
@@ -76,6 +111,49 @@ function resetForm(){const f=qs('#schedule-form');f.reset();editingId=null;qs('#
 function editSchedule(s){resetForm();editingId=s.id;qs('#form-title').textContent=`Edit schedule #${s.id}`;const f=qs('#schedule-form');f.elements.name.value=s.name||'';qs('#schedule-type').value=s.schedule_type||'weekly';if((s.schedule_type||'weekly')==='one_time'){qs('#single-date').value=s.start_date||'';}else{qs('#start-date').value=s.start_date||'';qs('#end-date').value=s.end_date||'';}setSelectedWeekdays(s.days||'');setTimePicker(s.time_local||'07:00');f.elements.mode.value=s.mode||'Cool';f.elements.temperature.value=s.temperature??72;f.elements.fan.value=s.fan||'Auto';f.elements.enabled.checked=Boolean(s.enabled);updateScheduleTypeUI();showForm();}
 function formPayload(){const f=qs('#schedule-form'),fd=new FormData(f),type=qs('#schedule-type').value;const days=type==='weekly'?selectedWeekdays():'';const payload={name:String(fd.get('name')||'').trim(),schedule_type:type,days,time_local:getTimePicker(),mode:fd.get('mode'),temperature:Number(fd.get('temperature')),fan:fd.get('fan'),enabled:f.elements.enabled.checked};if(type==='one_time'){payload.start_date=qs('#single-date').value||null;payload.end_date=payload.start_date;}else{payload.start_date=qs('#start-date').value||null;payload.end_date=qs('#end-date').value||null;}return payload;}
 function validatePayload(p){if(!p.name)return'Please enter a schedule name.';if(p.schedule_type==='one_time'&&!p.start_date)return'Please select the date.';if(p.schedule_type==='weekly'&&!p.days)return'Please choose at least one weekday.';if(p.start_date&&p.end_date&&p.end_date<p.start_date)return'End date cannot be before start date.';return'';}
+
+let aiSchedulePreview=[];
+function aiSchedulePreviewMarkup(item,index){
+  const action=item.action==='set'
+    ? [item.mode||'Auto',item.temperature!=null?item.temperature+'°F room target':'',item.fan?item.fan+' fan':''].filter(Boolean).join(' · ')
+    : String(item.action||'').toUpperCase();
+  return '<div class="ai-preview-row"><div class="ai-preview-number">'+(index+1)+'</div><div><strong>'+esc(item.name||'Schedule')+'</strong><div class="sub">'+esc(recurrenceText(item))+' · '+esc(prettyTime(item.time_local))+'<br>'+esc(action)+'</div></div></div>';
+}
+async function previewAiSchedule(){
+  const prompt=String(qs('#ai-schedule-prompt')?.value||'').trim(),state=qs('#ai-schedule-state'),box=qs('#ai-schedule-preview'),btn=qs('#ai-preview-schedule');
+  if(!prompt){if(state)state.textContent='Enter a schedule request first.';return;}
+  if(btn)btn.disabled=true;if(state)state.textContent='Building preview…';
+  try{
+    const d=await jfetch('/api/schedules/ai-preview',{method:'POST',body:JSON.stringify({prompt})});
+    aiSchedulePreview=Array.isArray(d.schedules)?d.schedules:[];
+    const questions=Array.isArray(d.questions)?d.questions:[];
+    let html='<div class="ai-preview-summary"><strong>'+esc(d.summary||'Schedule preview')+'</strong></div>';
+    if(questions.length)html+='<div class="ai-questions">'+questions.map(q=>'<div>• '+esc(q)+'</div>').join('')+'</div>';
+    if(aiSchedulePreview.length){
+      html+='<div class="ai-preview-list">'+aiSchedulePreview.map(aiSchedulePreviewMarkup).join('')+'</div>';
+      html+='<div class="ai-preview-footer"><button type="button" id="ai-create-schedules">Create '+aiSchedulePreview.length+' schedule'+(aiSchedulePreview.length===1?'':'s')+'</button><span>Review above before creating.</span></div>';
+    }
+    box.innerHTML=html;box.classList.remove('hidden');
+    if(state)state.textContent=aiSchedulePreview.length?'Preview ready':'More information needed';
+    const create=qs('#ai-create-schedules');if(create)create.addEventListener('click',createAiSchedules);
+  }catch(e){if(state)state.textContent=e.message;box.classList.add('hidden');}
+  finally{if(btn)btn.disabled=false;}
+}
+async function createAiSchedules(){
+  const btn=qs('#ai-create-schedules'),state=qs('#ai-schedule-state');
+  if(!aiSchedulePreview.length)return;
+  if(btn){btn.disabled=true;btn.textContent='Creating…';}
+  try{
+    for(const schedule of aiSchedulePreview){
+      await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(schedule)});
+    }
+    if(state)state.textContent='Schedules created';
+    aiSchedulePreview=[];
+    qs('#ai-schedule-preview').classList.add('hidden');
+    await loadSchedules();
+  }catch(e){if(state)state.textContent='Create failed: '+e.message;}
+  finally{if(btn){btn.disabled=false;btn.textContent='Create schedules';}}
+}
 
 function currentCommandBase(){const temp=Number(qs('#target-temp').textContent);return{temperature:Number.isFinite(temp)?temp:undefined,mode:currentStatus?.mode!=null?String(currentStatus.mode):undefined,fan:currentStatus?.fan_speed!=null?String(currentStatus.fan_speed):undefined,running:currentStatus?.running??true,horizontal_swing:Boolean(currentStatus?.horizontal_swing),vertical_swing:Boolean(currentStatus?.vertical_swing),eco_mode:Boolean(currentStatus?.eco_mode),comfort_sleep:Boolean(currentStatus?.comfort_sleep),turbo:Boolean(currentStatus?.turbo)};}
 async function sendCommand(payload,successText='Command sent'){qs('#status-detail').textContent='Sending and verifying…';try{const d=await jfetch('/api/device/command',{method:'POST',body:JSON.stringify(payload)});if(d.result){currentStatus={...d.result};try{localStorage.setItem('nethome:lastStatus',JSON.stringify(currentStatus));}catch(_){}renderStatus(currentStatus);}qs('#status-detail').textContent=d.verified?'Verified by AC':successText;return d;}catch(e){qs('#status-detail').textContent='Command failed';alert(e.message);throw e;}}
@@ -105,6 +183,8 @@ const smsSave=qs('#save-sms-config');if(smsSave)smsSave.addEventListener('click'
 const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click',copySmsWebhook);
 const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',saveGoogleVoiceConfig);
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
+const smartSave=qs('#save-smart-control');if(smartSave)smartSave.addEventListener('click',saveSmartControl);
+const aiPreview=qs('#ai-preview-schedule');if(aiPreview)aiPreview.addEventListener('click',previewAiSchedule);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
 qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
@@ -116,4 +196,4 @@ const bulkClear=qs('#bulk-clear');if(bulkClear)bulkClear.addEventListener('click
 qs('#schedule-list').addEventListener('click',async e=>{const btn=e.target.closest('[data-action]');if(!btn)return;const item=btn.closest('[data-id]');const id=Number(item.dataset.id);const s=schedulesCache.find(x=>x.id===id);if(!s)return;try{if(btn.dataset.action==='edit')editSchedule(s);if(btn.dataset.action==='toggle'){await jfetch(`/api/schedules/${id}`,{method:'PATCH',body:JSON.stringify({enabled:!s.enabled})});await loadSchedules();}if(btn.dataset.action==='delete'){if(confirm(`Delete schedule #${id} — ${s.name}?`)){await jfetch(`/api/schedules/${id}`,{method:'DELETE'});await loadSchedules();if(editingId===id)hideForm();}}}catch(err){alert(err.message);}});
 qs('#schedule-form').addEventListener('submit',async e=>{e.preventDefault();const p=formPayload();const error=validatePayload(p),box=qs('#schedule-error');if(error){box.textContent=error;box.classList.remove('hidden');return;}box.classList.add('hidden');const save=qs('#save-schedule');save.disabled=true;save.textContent='Saving…';try{if(editingId){await jfetch(`/api/schedules/${editingId}`,{method:'PATCH',body:JSON.stringify(p)});}else{await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(p)});}resetForm();hideForm();await loadSchedules();}catch(err){box.textContent=err.message;box.classList.remove('hidden');}finally{save.disabled=false;save.textContent='Save schedule';}});
 
-initTimePicker();updateScheduleTypeUI();loadCachedStatus();loadHealth().then(()=>refreshStatus({silent:Boolean(currentStatus)})).catch(()=>{});loadSchedules().catch(()=>{});
+initTimePicker();updateScheduleTypeUI();loadCachedStatus();loadHealth().then(()=>refreshStatus({silent:Boolean(currentStatus)})).catch(()=>{});loadSchedules().catch(()=>{});loadSmartControl().catch(()=>{});
