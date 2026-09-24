@@ -5,6 +5,8 @@ import hashlib
 import hmac
 import json
 import secrets
+from datetime import datetime
+from zoneinfo import ZoneInfo
 from contextlib import asynccontextmanager
 from html import escape
 from pathlib import Path
@@ -31,16 +33,29 @@ from .db import (
     load_email_bridge_config,
     load_google_voice_config,
     load_sms_config,
+    load_smart_control_config,
     save_device_state,
     save_email_bridge_config,
     save_google_voice_config,
     save_sms_config,
+    save_smart_control_config,
     update_schedule,
 )
 from .mcp_server import mcp as nethome_mcp, mcp_http_app
 from .midea_client import midea
 from .messaging import process_text_command
-from .models import DeviceCommand, EmailBridgeConfigUpdate, GoogleVoiceConfigUpdate, ScheduleCreate, ScheduleUpdate, SmsConfigUpdate
+from .models import (
+    DeviceCommand,
+    EmailBridgeConfigUpdate,
+    GoogleVoiceConfigUpdate,
+    ScheduleCreate,
+    SchedulePromptRequest,
+    ScheduleUpdate,
+    SmartControlCalibration,
+    SmartControlTarget,
+    SmartControlToggle,
+    SmsConfigUpdate,
+)
 from .scheduler import run_due_schedules
 from .tuya_client import TuyaCloudError, tuya
 
@@ -754,6 +769,138 @@ def worker_complete(execution_id: int, body: WorkerCompleteRequest):
 @app.post("/api/worker/state", dependencies=[Depends(worker_auth)])
 def worker_state(body: WorkerStateRequest):
     return {"ok": True, "retired": True}
+
+
+def _interpret_schedule_prompt(prompt: str) -> list[dict]:
+    if not settings.openai_api_key:
+        raise HTTPException(status_code=503, detail="AI schedule interpreter is not configured")
+
+    now_local = datetime.now(ZoneInfo("America/New_York"))
+    schema = {
+        "type": "object",
+        "properties": {
+            "schedules": {
+                "type": "array",
+                "maxItems": 30,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "schedule_type": {"type": "string", "enum": ["one_time", "weekdays", "daily", "weekly"]},
+                        "days": {"type": "string"},
+                        "start_date": {"type": ["string", "null"]},
+                        "end_date": {"type": ["string", "null"]},
+                        "time_local": {"type": "string"},
+                        "action": {"type": "string", "enum": ["set", "on", "off"]},
+                        "mode": {"type": ["string", "null"], "enum": ["Cool", "Heat", "Auto", "Fan", "Dry", None]},
+                        "temperature": {"type": ["number", "null"]},
+                        "fan": {"type": ["string", "null"], "enum": ["Auto", "Low", "Medium", "High", None]},
+                        "enabled": {"type": "boolean"},
+                    },
+                    "required": ["name", "schedule_type", "days", "start_date", "end_date", "time_local", "action", "mode", "temperature", "fan", "enabled"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["schedules"],
+        "additionalProperties": False,
+    }
+    instructions = f"""Convert the user's plain-English HVAC scheduling request into NetHome schedule rows.
+Current local date/time: {now_local.isoformat()}
+Timezone: America/New_York.
+
+Do not invent missing dates or times. If the prompt is too ambiguous to produce safe schedules, return an empty schedules array.
+Use 24-hour HH:MM for time_local.
+Use Mon,Tue,Wed,Thu,Fri,Sat,Sun tokens for weekly days.
+For weekdays use schedule_type=weekdays. For every day use daily. For a specific date use one_time with start_date=end_date.
+For set actions, include mode/temperature/fan only when the user supplied or clearly requested them.
+This endpoint PREVIEWS only; nothing is saved until the user confirms on the website."""
+    payload = {
+        "model": settings.openai_model,
+        "instructions": instructions,
+        "input": prompt,
+        "max_output_tokens": 1800,
+        "text": {
+            "format": {
+                "type": "json_schema",
+                "name": "nethome_schedule_preview",
+                "strict": True,
+                "schema": schema,
+            }
+        },
+    }
+    req = UrlRequest(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Authorization": f"Bearer {settings.openai_api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(req, timeout=25) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"AI schedule interpretation failed: {str(exc)[:180]}") from exc
+
+    output_text = str(data.get("output_text") or "").strip()
+    if not output_text:
+        for item in data.get("output") or []:
+            for part in item.get("content") or []:
+                if part.get("type") in {"output_text", "text"} and part.get("text"):
+                    output_text = str(part["text"]).strip()
+                    break
+            if output_text:
+                break
+    if not output_text:
+        return []
+
+    parsed = json.loads(output_text)
+    rows = parsed.get("schedules") if isinstance(parsed, dict) else []
+    clean: list[dict] = []
+    for row in rows or []:
+        try:
+            clean.append(ScheduleCreate.model_validate(row).model_dump())
+        except Exception:
+            continue
+    return clean
+
+
+@app.post("/api/schedules/interpret", dependencies=[Depends(access_auth)])
+def schedules_interpret(body: SchedulePromptRequest):
+    rows = _interpret_schedule_prompt(body.prompt)
+    add_activity("web", "schedule_ai_preview", "success", f"count={len(rows)} prompt={body.prompt[:120]}")
+    return {"ok": True, "schedules": rows, "saved": False}
+
+
+@app.get("/api/smart-control", dependencies=[Depends(access_auth)])
+def smart_control_status():
+    config = load_smart_control_config()
+    sensor = None
+    try:
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+    except Exception:
+        sensor = None
+    return {**config, "sensor": sensor}
+
+
+@app.post("/api/smart-control/toggle", dependencies=[Depends(access_auth)])
+def smart_control_toggle(body: SmartControlToggle):
+    config = save_smart_control_config({"enabled": body.enabled})
+    add_activity("smart-control-config", "toggle", "success", f"enabled={body.enabled}")
+    return config
+
+
+@app.post("/api/smart-control/target", dependencies=[Depends(access_auth)])
+def smart_control_target(body: SmartControlTarget):
+    config = save_smart_control_config({"target_temperature_f": body.target_temperature_f})
+    add_activity("smart-control-config", "target", "success", f"target={body.target_temperature_f}")
+    return config
+
+
+@app.post("/api/smart-control/calibration", dependencies=[Depends(access_auth)])
+def smart_control_calibration(body: SmartControlCalibration):
+    config = save_smart_control_config({"sensor_calibration_f": body.sensor_calibration_f})
+    add_activity("smart-control-config", "calibration", "success", f"offset={body.sensor_calibration_f}")
+    return config
 
 
 @app.get("/api/schedules", dependencies=[Depends(access_auth)])
