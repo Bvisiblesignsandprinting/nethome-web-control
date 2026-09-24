@@ -84,3 +84,13 @@
     width:100%;
   }
 }
+
+.ai-schedule-card{margin-bottom:16px;border:1px solid #dbe4e8;background:linear-gradient(180deg,#fff,#f8fbfc)}
+.ai-schedule-card textarea{width:100%;resize:vertical;min-height:96px;margin-top:16px;border:1px solid #d5dde0;border-radius:12px;padding:13px 14px;font:inherit;color:#24353d;background:white;line-height:1.5}
+.ai-schedule-card textarea:focus{outline:2px solid #b9c9d0;outline-offset:1px}
+.ai-schedule-actions{justify-content:flex-start;align-items:center}
+.ai-schedule-results{margin-top:16px;border-top:1px solid #e6ecee;padding-top:12px;display:grid;gap:8px}
+.ai-preview-row{background:#fff;border:1px solid #e1e7e9;border-radius:12px;padding:12px 14px}
+.ai-preview-row .sub{font-size:12px;color:#71828a;line-height:1.5;margin-top:4px}
+.ai-confirm-bar{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding-top:6px}
+.ai-confirm-bar span{margin-right:auto;color:#62757d;font-size:12px;font-weight:800}
