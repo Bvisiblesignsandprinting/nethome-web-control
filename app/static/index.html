@@ -89,6 +89,23 @@
           <button id="add-schedule">+ New schedule</button>
         </div>
 
+        <div class="card ai-schedule-card">
+          <div class="ai-schedule-head">
+            <div>
+              <p class="eyebrow">AI SCHEDULE BUILDER</p>
+              <h2>Describe the schedule you want</h2>
+              <p class="lede">Write it naturally. Nothing is saved until you review and confirm the preview.</p>
+            </div>
+            <span class="ai-badge">Preview first</span>
+          </div>
+          <textarea id="ai-schedule-prompt" rows="4" placeholder="Example: Every weekday at 8 AM keep the room at 72° in Auto, then turn it off at 11 PM."></textarea>
+          <div class="ai-schedule-actions">
+            <button type="button" id="ai-preview-schedule">Preview schedule</button>
+            <span id="ai-schedule-state" class="setting-state"></span>
+          </div>
+          <div id="ai-schedule-preview" class="ai-preview hidden"></div>
+        </div>
+
         <div id="schedule-bulk-bar" class="schedule-bulk-bar hidden">
           <label class="bulk-select-all"><input type="checkbox" id="schedule-select-all"> <span>Select all</span></label>
           <span id="schedule-selected-count" class="bulk-count">0 selected</span>
@@ -192,6 +209,46 @@
       <section id="settings" class="view">
         <div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1>Settings</h1><p class="lede">Cloud control and direct text-message settings.</p></div></div>
         <div class="settings-grid">
+          <article class="card setting-card smart-control-card" style="grid-column:1/-1">
+            <div class="setting-icon">°</div>
+            <div style="width:100%">
+              <div class="smart-control-heading">
+                <div>
+                  <h2>Smart Room Control</h2>
+                  <p>The Tuya Wi-Fi room sensor is the authoritative temperature source. NetHome automatically adjusts the mini-split to hold the room target.</p>
+                </div>
+                <label class="web-switch"><input id="smart-enabled" type="checkbox"><span></span></label>
+              </div>
+              <div class="smart-room-readout">
+                <div><small>ROOM</small><strong id="smart-room-temp">--°</strong></div>
+                <div><small>TARGET</small><strong id="smart-target-display">72°</strong></div>
+                <div><small>HUMIDITY</small><strong id="smart-humidity">--%</strong></div>
+                <div><small>SENSOR</small><strong id="smart-sensor-state">Checking</strong></div>
+              </div>
+              <div class="form-grid smart-settings-grid">
+                <label class="field">Target room temperature
+                  <div class="input-suffix"><input id="smart-target" type="number" min="50" max="90" step="1" value="72"><span>°F</span></div>
+                </label>
+                <label class="field">Preferred mode
+                  <select id="smart-mode"><option value="auto">Auto</option><option value="cool">Cool only</option><option value="heat">Heat only</option></select>
+                </label>
+                <label class="field">Sensor calibration
+                  <div class="input-suffix"><input id="smart-calibration" type="number" min="-10" max="10" step="0.5" value="0"><span>°F</span></div>
+                </label>
+                <label class="field">Comfort deadband
+                  <div class="input-suffix"><input id="smart-deadband" type="number" min="0.5" max="4" step="0.5" value="1"><span>± °F</span></div>
+                </label>
+                <label class="field">Minimum time between AC changes
+                  <select id="smart-min-interval"><option value="3">3 minutes</option><option value="5" selected>5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option></select>
+                </label>
+              </div>
+              <div class="form-actions" style="justify-content:flex-start">
+                <button type="button" id="save-smart-control">Save Smart Control</button>
+                <span id="smart-control-state" class="setting-state">Loading…</span>
+              </div>
+              <p class="helper">If the room sensor becomes stale or offline, Smart Control pauses rather than acting on old data. Manual temperature changes become the new room target.</p>
+            </div>
+          </article>
           <article class="card setting-card"><div class="setting-icon">☁</div><div><h2>NetHome Plus</h2><p>AC commands run directly through the hosted NetHome cloud connection. No computer worker is required.</p><span class="setting-state ok-text">Cloud connected</span></div></article>
           <article class="card setting-card"><div class="setting-icon">✓</div><div><h2>Current host</h2><p>GitHub → Vercel → Supabase → NetHome/Midea Cloud.</p><span class="setting-state ok-text">Hosted</span></div></article>
           <article class="card setting-card" style="grid-column:1/-1">
