@@ -887,6 +887,7 @@ def smart_control_status():
         "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
         "deadband_f": float(config.get("deadband_f") or 1.0),
         "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
+        "preferred_mode": str(config.get("preferred_mode") or "auto"),
         "last_command_at": config.get("last_command_at"),
     }
     return {
@@ -897,7 +898,18 @@ def smart_control_status():
         "sensor_calibration_f": panel_config["calibration_f"],
         "deadband_f": panel_config["deadband_f"],
         "min_command_interval_minutes": panel_config["min_command_interval_minutes"],
+        "preferred_mode": panel_config["preferred_mode"],
         "last_command_at": panel_config["last_command_at"],
+        "room_temperature_f": (
+            round(float(sensor.get("temperature_f")) + panel_config["calibration_f"], 1)
+            if sensor and sensor.get("ok") and sensor.get("temperature_f") is not None
+            else None
+        ),
+        "status": (
+            "monitoring" if panel_config["enabled"] and sensor and sensor.get("ok")
+            else "sensor unavailable" if panel_config["enabled"]
+            else "disabled"
+        ),
         "sensor": sensor,
     }
 
@@ -915,6 +927,8 @@ def smart_control_update(body: SmartControlUpdate):
         patch["deadband_f"] = body.deadband_f
     if body.min_command_interval_minutes is not None:
         patch["min_command_interval_minutes"] = body.min_command_interval_minutes
+    if body.preferred_mode is not None:
+        patch["preferred_mode"] = body.preferred_mode
     config = save_smart_control_config(patch) if patch else load_smart_control_config()
     add_activity(
         "smart-control-config",
@@ -930,6 +944,7 @@ def smart_control_update(body: SmartControlUpdate):
             "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
             "deadband_f": float(config.get("deadband_f") or 1.0),
             "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
+            "preferred_mode": str(config.get("preferred_mode") or "auto"),
             "last_command_at": config.get("last_command_at"),
         },
     }
