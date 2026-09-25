@@ -337,11 +337,18 @@ def save_google_voice_config(data: dict[str, Any]) -> None:
 def load_smart_control_config() -> dict[str, Any]:
     defaults = {
         "enabled": False,
-        "target_temperature_f": 72.0,
+        "target_temperature_f": 73.0,
         "sensor_calibration_f": 0.0,
         "deadband_f": 1.0,
         "min_command_interval_minutes": 5,
         "preferred_mode": "auto",
+        "preset_sudah_f": 74.0,
+        "preset_all_day_f": 73.0,
+        "preset_sleeping_f": 72.0,
+        "active_preset": "all_day",
+        "comfort_since": None,
+        "outside_temperature_f": None,
+        "outside_checked_at": None,
         "last_command_at": None,
     }
     if _use_postgres():
