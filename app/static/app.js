@@ -1,7 +1,7 @@
 const qs=(s)=>document.querySelector(s);const qsa=(s)=>[...document.querySelectorAll(s)];
 let editingId=null;let schedulesCache=[];let selectedScheduleIds=new Set();let writesEnabled=false;let liveStatusOk=false;let currentStatus=null;let pendingTimer=null;let pendingPayload=null;let settingInFlight=false;let queuedSettingText='Settings sent';
 
-qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();loadSmartControl();}}));
+qsa('.nav').forEach(btn=>btn.addEventListener('click',()=>{qsa('.nav').forEach(x=>x.classList.remove('active'));qsa('.view').forEach(x=>x.classList.remove('active'));btn.classList.add('active');qs('#'+btn.dataset.view).classList.add('active');if(btn.dataset.view==='dashboard')loadSmartControl();if(btn.dataset.view==='schedules')loadSchedules();if(btn.dataset.view==='activity')loadActivity();if(btn.dataset.view==='settings'){loadSmsConfig();loadGoogleVoiceConfig();loadSmartControl();}}));
 
 async function jfetch(url,options={}){const r=await fetch(url,{headers:{'Content-Type':'application/json',...(options.headers||{})},credentials:'same-origin',...options});if(r.status===401){window.location.href='/login';throw new Error('Login required');}const data=await r.json().catch(()=>({}));if(!r.ok)throw new Error(data.detail||`HTTP ${r.status}`);return data;}
 function cToF(c){return c==null||c===""?null:Math.round((Number(c)*9/5)+32);}
@@ -75,10 +75,90 @@ async function loadSmartControl(){
   const state=qs('#smart-control-state');
   try{
     const d=await jfetch('/api/smart-control');
-    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),mode=qs('#smart-control-mode'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
-    if(enabled)enabled.value=String(Boolean(d.enabled));if(target)target.value=d.target_temperature_f??72;if(mode)mode.value=d.preferred_mode??'auto';if(cal)cal.value=d.sensor_calibration_f??0;if(deadband)deadband.value=d.deadband_f??1;if(interval)interval.value=d.min_command_interval_minutes??5;
-    if(state){const sensor=d.sensor;const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):'Sensor unavailable';state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');}
-  }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
+    const sensor=d.sensor||null;
+    const room=d.room_temperature_f;
+    const target=d.target_temperature_f;
+    const enabled=Boolean(d.enabled);
+    const activePreset=d.active_preset||'custom';
+
+    const enabledEl=qs('#smart-control-enabled'),targetEl=qs('#smart-control-target'),mode=qs('#smart-control-mode'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
+    if(enabledEl)enabledEl.value=String(enabled);
+    if(targetEl)targetEl.value=target??73;
+    if(mode)mode.value=d.preferred_mode??'auto';
+    if(cal)cal.value=d.sensor_calibration_f??0;
+    if(deadband)deadband.value=d.deadband_f??1;
+    if(interval)interval.value=d.min_command_interval_minutes??5;
+
+    const ps=qs('#smart-preset-sudah'),pa=qs('#smart-preset-all-day'),pp=qs('#smart-preset-sleeping');
+    if(ps)ps.value=d.preset_sudah_f??74;
+    if(pa)pa.value=d.preset_all_day_f??73;
+    if(pp)pp.value=d.preset_sleeping_f??72;
+
+    const dashRoom=qs('#dashboard-smart-room'),dashTarget=qs('#dashboard-smart-target'),dashHumidity=qs('#dashboard-smart-humidity'),dashOutside=qs('#dashboard-smart-outside'),dashCustom=qs('#dashboard-smart-custom');
+    if(dashRoom)dashRoom.textContent=room!=null?room+'°F':'--°F';
+    if(dashTarget)dashTarget.textContent=target!=null?target+'°F':'--°F';
+    if(dashHumidity)dashHumidity.textContent=sensor?.humidity!=null?sensor.humidity+'%':'--%';
+    if(dashOutside)dashOutside.textContent=d.outside_temperature_f!=null?Math.round(Number(d.outside_temperature_f))+'°F':'--°F';
+    if(dashCustom)dashCustom.textContent=(target??73)+'°F';
+
+    const dpSudah=qs('#dashboard-preset-sudah'),dpAll=qs('#dashboard-preset-all-day'),dpSleep=qs('#dashboard-preset-sleeping');
+    if(dpSudah)dpSudah.textContent=(d.preset_sudah_f??74)+'°F';
+    if(dpAll)dpAll.textContent=(d.preset_all_day_f??73)+'°F';
+    if(dpSleep)dpSleep.textContent=(d.preset_sleeping_f??72)+'°F';
+
+    qsa('[data-smart-preset]').forEach(btn=>btn.classList.toggle('active',btn.dataset.smartPreset===activePreset));
+    qsa('[data-settings-preset]').forEach(btn=>btn.classList.toggle('active',btn.dataset.settingsPreset===activePreset));
+
+    const toggle=qs('#dashboard-smart-toggle');
+    if(toggle){
+      toggle.textContent=enabled?'🟢 Smart Room ON':'⚫ Smart Room OFF';
+      toggle.classList.toggle('active',enabled);
+    }
+
+    const roomSetting=qs('#settings-room-temp'),targetSetting=qs('#settings-active-target'),sensorSetting=qs('#settings-sensor-status'),lastSetting=qs('#settings-last-command');
+    if(roomSetting)roomSetting.textContent=room!=null?room+'°F':'--°F';
+    if(targetSetting)targetSetting.textContent=target!=null?target+'°F':'--°F';
+    if(sensorSetting){
+      const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
+      sensorSetting.textContent=sensor&&sensor.ok?('Online'+(updated?' · '+updated:'')):'Unavailable';
+    }
+    if(lastSetting)lastSetting.textContent=d.last_command_at?new Date(d.last_command_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'No recent change';
+
+    const detail=qs('#dashboard-smart-detail');
+    if(detail){
+      const presetLabel=activePreset==='all_day'?'All Day':activePreset==='sleeping'?'Sleeping':activePreset==='sudah'?'Sudah':'Custom';
+      const modeLabel=(d.preferred_mode||'auto').replace(/^./,c=>c.toUpperCase());
+      const sensorAge=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'unknown';
+      detail.textContent=(enabled?'Smart Room is controlling the room. ':'Smart Room is currently off. ')+
+        `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · Sensor ${sensorAge}`;
+    }
+
+    if(state){
+      const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
+      state.textContent=sensor&&sensor.ok?'Sensor '+(room??sensor.temperature_f)+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):'Sensor unavailable';
+      state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');
+    }
+    return d;
+  }catch(e){
+    if(state){state.textContent=e.message;state.className='setting-state warning';}
+    const detail=qs('#dashboard-smart-detail');if(detail)detail.textContent='Unable to load Smart Room: '+e.message;
+    throw e;
+  }
+}
+
+async function patchSmartControl(patch,successText='Smart Room updated'){
+  const detail=qs('#dashboard-smart-detail'),state=qs('#smart-control-state');
+  if(detail)detail.textContent='Saving Smart Room change…';
+  if(state)state.textContent='Saving…';
+  try{
+    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify(patch)});
+    await loadSmartControl();
+    if(state){state.textContent=successText;state.className='setting-state ok-text';}
+  }catch(e){
+    if(detail)detail.textContent='Smart Room change failed: '+e.message;
+    if(state){state.textContent=e.message;state.className='setting-state warning';}
+    throw e;
+  }
 }
 
 async function saveSmartControl(){
@@ -86,14 +166,40 @@ async function saveSmartControl(){
   if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
   try{
     const enabled=qs('#smart-control-enabled')?.value==='true';
-    const target=Number(qs('#smart-control-target')?.value);
     const preferred_mode=qs('#smart-control-mode')?.value||'auto';
-    const calibration=Number(qs('#smart-control-calibration')?.value);
-    const deadband=Number(qs('#smart-control-deadband')?.value);
+    const calibration_f=Number(qs('#smart-control-calibration')?.value);
+    const deadband_f=Number(qs('#smart-control-deadband')?.value);
     const min_command_interval_minutes=Number(qs('#smart-control-interval')?.value);
-    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify({enabled,target_temperature:target,preferred_mode,calibration_f:calibration,deadband_f:deadband,min_command_interval_minutes})});
+    const preset_sudah_f=Number(qs('#smart-preset-sudah')?.value);
+    const preset_all_day_f=Number(qs('#smart-preset-all-day')?.value);
+    const preset_sleeping_f=Number(qs('#smart-preset-sleeping')?.value);
+    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify({enabled,preferred_mode,calibration_f,deadband_f,min_command_interval_minutes,preset_sudah_f,preset_all_day_f,preset_sleeping_f})});
     await loadSmartControl();
+    if(state){state.textContent='Smart Room settings saved';state.className='setting-state ok-text';}
   }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}
+}
+
+async function applyCustomSmartTarget(value){
+  const target=Math.max(50,Math.min(90,Number(value)));
+  if(!Number.isFinite(target))return;
+  await patchSmartControl({target_temperature:target},'Custom target applied');
+}
+
+async function changeDashboardSmartTarget(delta){
+  const el=qs('#dashboard-smart-custom');
+  const current=Number(String(el?.textContent||'73').replace(/[^0-9.-]/g,''))||73;
+  const next=Math.max(50,Math.min(90,Math.round((current+delta)*2)/2));
+  if(el)el.textContent=next+'°F';
+  await applyCustomSmartTarget(next);
+}
+
+async function selectSmartPreset(preset){
+  await patchSmartControl({active_preset:preset},'Preset applied');
+}
+
+async function toggleSmartRoom(){
+  const current=qs('#dashboard-smart-toggle')?.classList.contains('active');
+  await patchSmartControl({enabled:!current},!current?'Smart Room turned on':'Smart Room turned off');
 }
 
 async function loadSchedules(){
@@ -169,6 +275,12 @@ const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',sav
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
 qs('#schedule-ai-preview')?.addEventListener('click',previewAiSchedule);
 qs('#save-smart-control')?.addEventListener('click',saveSmartControl);
+qs('#apply-smart-target')?.addEventListener('click',()=>applyCustomSmartTarget(qs('#smart-control-target')?.value));
+qs('#dashboard-smart-toggle')?.addEventListener('click',toggleSmartRoom);
+qs('#dashboard-smart-down')?.addEventListener('click',()=>changeDashboardSmartTarget(-0.5));
+qs('#dashboard-smart-up')?.addEventListener('click',()=>changeDashboardSmartTarget(0.5));
+qsa('[data-smart-preset]').forEach(btn=>btn.addEventListener('click',()=>selectSmartPreset(btn.dataset.smartPreset)));
+qsa('[data-settings-preset]').forEach(btn=>btn.addEventListener('click',()=>selectSmartPreset(btn.dataset.settingsPreset)));
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
 qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
@@ -180,4 +292,4 @@ const bulkClear=qs('#bulk-clear');if(bulkClear)bulkClear.addEventListener('click
 qs('#schedule-list').addEventListener('click',async e=>{const btn=e.target.closest('[data-action]');if(!btn)return;const item=btn.closest('[data-id]');const id=Number(item.dataset.id);const s=schedulesCache.find(x=>x.id===id);if(!s)return;try{if(btn.dataset.action==='edit')editSchedule(s);if(btn.dataset.action==='toggle'){await jfetch(`/api/schedules/${id}`,{method:'PATCH',body:JSON.stringify({enabled:!s.enabled})});await loadSchedules();}if(btn.dataset.action==='delete'){if(confirm(`Delete schedule #${id} — ${s.name}?`)){await jfetch(`/api/schedules/${id}`,{method:'DELETE'});await loadSchedules();if(editingId===id)hideForm();}}}catch(err){alert(err.message);}});
 qs('#schedule-form').addEventListener('submit',async e=>{e.preventDefault();const p=formPayload();const error=validatePayload(p),box=qs('#schedule-error');if(error){box.textContent=error;box.classList.remove('hidden');return;}box.classList.add('hidden');const save=qs('#save-schedule');save.disabled=true;save.textContent='Saving…';try{if(editingId){await jfetch(`/api/schedules/${editingId}`,{method:'PATCH',body:JSON.stringify(p)});}else{await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(p)});}resetForm();hideForm();await loadSchedules();}catch(err){box.textContent=err.message;box.classList.remove('hidden');}finally{save.disabled=false;save.textContent='Save schedule';}});
 
-initTimePicker();updateScheduleTypeUI();loadCachedStatus();loadHealth().then(()=>refreshStatus({silent:Boolean(currentStatus)})).catch(()=>{});loadSchedules().catch(()=>{});
+initTimePicker();updateScheduleTypeUI();loadCachedStatus();loadHealth().then(()=>refreshStatus({silent:Boolean(currentStatus)})).catch(()=>{});loadSmartControl().catch(()=>{});loadSchedules().catch(()=>{});setInterval(()=>{if(qs('#dashboard')?.classList.contains('active'))loadSmartControl().catch(()=>{});},30000);
