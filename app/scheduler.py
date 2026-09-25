@@ -461,12 +461,23 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                     sensor_ready = False
 
                 if sensor_ready:
-                    save_smart_control_config(
-                        {
-                            "target_temperature_f": float(schedule["temperature"]),
-                            "last_command_at": None,
-                        }
+                    target_temperature = float(schedule["temperature"])
+                    smart_patch = {
+                        "target_temperature_f": target_temperature,
+                        "last_command_at": None,
+                        "comfort_since": None,
+                    }
+                    preset_candidates = (
+                        ("sudah", "preset_sudah_f", 74.0),
+                        ("all_day", "preset_all_day_f", 73.0),
+                        ("sleeping", "preset_sleeping_f", 72.0),
                     )
+                    for preset_name, preset_key, default_value in preset_candidates:
+                        preset_value = float(smart_config.get(preset_key) or default_value)
+                        if abs(target_temperature - preset_value) < 0.01:
+                            smart_patch["active_preset"] = preset_name
+                            break
+                    save_smart_control_config(smart_patch)
                     smart_target_updated = True
                     cloud_command.pop("temperature", None)
 
