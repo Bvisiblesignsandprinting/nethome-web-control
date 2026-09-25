@@ -217,8 +217,20 @@
                 <label class="field">Smart control
                   <select id="smart-control-enabled"><option value="false">Off</option><option value="true">On</option></select>
                 </label>
-                <label class="field">Room target
-                  <div class="input-suffix"><input id="smart-control-target" type="number" min="50" max="90" step="1"><span>°F</span></div>
+                <label class="field">Active comfort preset
+                  <select id="smart-control-preset"><option value="sudah">Sudah</option><option value="all_day">All Day</option><option value="sleeping">Sleeping</option></select>
+                </label>
+                <label class="field">Current room target
+                  <div class="input-suffix"><input id="smart-control-target" type="number" min="50" max="90" step="1" readonly><span>°F</span></div>
+                </label>
+                <label class="field">Sudah
+                  <div class="input-suffix"><input id="smart-preset-sudah" type="number" min="50" max="90" step="1" value="74"><span>°F</span></div>
+                </label>
+                <label class="field">All Day
+                  <div class="input-suffix"><input id="smart-preset-all-day" type="number" min="50" max="90" step="1" value="73"><span>°F</span></div>
+                </label>
+                <label class="field">Sleeping
+                  <div class="input-suffix"><input id="smart-preset-sleeping" type="number" min="50" max="90" step="1" value="72"><span>°F</span></div>
                 </label>
                 <label class="field">Preferred mode
                   <select id="smart-control-mode"><option value="auto">Auto</option><option value="cool">Cool only</option><option value="heat">Heat only</option></select>
@@ -233,6 +245,7 @@
                   <div class="input-suffix"><input id="smart-control-interval" type="number" min="1" max="30" step="1"><span>min</span></div>
                 </label>
               </div>
+              <p class="helper">Smart Room automatically chooses Heat/Cool, tapers fan speed as the room approaches target, uses low Fan Only briefly when the room is comfortable and outdoor conditions are mild, then turns the unit off and keeps watching the room sensor.</p>
               <div class="form-actions" style="justify-content:flex-start">
                 <button type="button" id="save-smart-control">Save smart control</button>
                 <span id="smart-control-state" class="setting-state">Loading…</span>
