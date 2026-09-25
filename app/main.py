@@ -533,7 +533,7 @@ function extractVoiceCommand(body) {{
 
   // For normal commands, use only the actual command line. Google Voice emails
   // can contain extra footer/thread text that must not become part of the command.
-  const commandPattern = /^(STATUS|ON|OFF|HELP|START|YES|STOP|SCHEDULES?|MODE|WEATHER(?:\s+.*)?|TEMP(?:ERATURE)?\s+\d+(?:\.\d+)?|SET\s+\d+(?:\.\d+)?|COOL\s+\d+(?:\.\d+)?|HEAT\s+\d+(?:\.\d+)?|FAN(?:\s+(?:AUTO|LOW|MEDIUM|HIGH))?|ADD SCHEDULE\s+.*)$/i;
+  const commandPattern = /^(STATUS|SMART STATUS|SMART (?:ON|OFF)|SMART \d+(?:\.\d+)?|TARGET \d+(?:\.\d+)?|PRESET (?:SUDAH|ALL DAY|SLEEPING)|SMART MODE (?:AUTO|COOL|HEAT)|DEADBAND \d+(?:\.\d+)?|INTERVAL \d+|SENSOR|NEXT SCHEDULE|ON|OFF|HELP|START|YES|STOP|SCHEDULES?|MODE|WEATHER(?:\s+.*)?|TEMP(?:ERATURE)?\s+\d+(?:\.\d+)?|SET\s+\d+(?:\.\d+)?|COOL\s+\d+(?:\.\d+)?|HEAT\s+\d+(?:\.\d+)?|FAN(?:\s+(?:AUTO|LOW|MEDIUM|HIGH))?|ADD SCHEDULE\s+.*)$/i;
   for (const line of useful) {{
     if (commandPattern.test(line)) return line;
   }}
