@@ -15,10 +15,13 @@ from .db import (
     enqueue_device_command_at,
     get_latest_device_state,
     list_schedules,
+    load_smart_control_config,
     save_device_state,
+    save_smart_control_config,
     update_schedule,
 )
 from .midea_client import midea
+from .tuya_client import tuya
 from .weather import comfort_recommendation, current_weather, forecast_range, forecast_summary
 
 HELP_TEXT = """🏠 NetHome AC Control
@@ -35,7 +38,12 @@ Try:
 • Show my schedule
 • Show the next 10 days
 • Turn it off tomorrow at 11 PM
+• Smart status
+• Smart on / Smart off
+• Smart 73
+• Preset All Day / Sleeping / Sudah
 Shortcuts: STATUS • ON • OFF • COOL 72 • HEAT 70 • FAN AUTO
+Smart: SMART STATUS • SMART ON • SMART OFF • TARGET 73 • PRESET ALL DAY
 If a change isn't clear, I'll ask before changing the AC."""
 
 
@@ -80,6 +88,220 @@ def _status_reply(result: dict[str, Any]) -> str:
         h = "On" if horizontal else "Off"
         lines.append(f"Swing: ↕ {v} • ↔ {h}")
     return "\n".join(lines)
+
+
+
+def _format_age(updated_at: str | None) -> str | None:
+    if not updated_at:
+        return None
+    try:
+        dt = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        seconds = max(0, int((datetime.now(timezone.utc) - dt.astimezone(timezone.utc)).total_seconds()))
+        if seconds < 90:
+            return "just now"
+        minutes = seconds // 60
+        if minutes < 60:
+            return f"{minutes} min ago"
+        hours = minutes // 60
+        return f"{hours} hr ago"
+    except Exception:
+        return None
+
+
+def _next_schedule_line() -> str | None:
+    try:
+        for row, nxt in _schedule_entries():
+            if row.get("enabled") and nxt is not None:
+                return f"{nxt.strftime('%a %-I:%M %p')} • {_schedule_command_text(row)}"
+    except Exception:
+        return None
+    return None
+
+
+def _smart_snapshot(midea_state: dict[str, Any] | None = None) -> dict[str, Any]:
+    config = load_smart_control_config()
+    sensor = None
+    try:
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+    except Exception:
+        sensor = None
+
+    calibration = float(config.get("sensor_calibration_f") or 0.0)
+    room_temp = None
+    if sensor and sensor.get("ok") and sensor.get("temperature_f") is not None:
+        room_temp = round(float(sensor["temperature_f"]) + calibration, 1)
+
+    outside = config.get("outside_temperature_f")
+    try:
+        weather = current_weather()
+        if weather.get("temperature_f") is not None:
+            outside = weather["temperature_f"]
+    except Exception:
+        pass
+
+    return {
+        "config": config,
+        "sensor": sensor,
+        "room_temperature_f": room_temp,
+        "outside_temperature_f": outside,
+        "midea": midea_state,
+        "next_schedule": _next_schedule_line(),
+    }
+
+
+def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: bool = False) -> str:
+    snap = _smart_snapshot(midea_state)
+    config = snap["config"]
+    sensor = snap["sensor"] or {}
+    room = snap["room_temperature_f"]
+    target = float(config.get("target_temperature_f") or 73.0)
+    enabled = bool(config.get("enabled"))
+    preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
+    preferred = str(config.get("preferred_mode") or "auto").title()
+    deadband = float(config.get("deadband_f") or 1.0)
+    interval = int(config.get("min_command_interval_minutes") or 5)
+
+    lines = [
+        "🧠 Smart Room",
+        f"Smart: {'🟢 On' if enabled else '⚫ Off'}",
+        f"Target: {target:g}°F",
+        f"Preset: {preset}",
+        f"Preferred mode: {preferred}",
+        f"Deadband: ±{deadband:g}°F",
+        f"Min interval: {interval} min",
+    ]
+
+    if room is not None:
+        lines.append(f"Room sensor: {room:g}°F")
+    if sensor.get("humidity") is not None:
+        lines.append(f"Humidity: {sensor['humidity']}%")
+    if sensor:
+        online = sensor.get("online")
+        state = "Online" if online is not False else "Offline"
+        age = _format_age(sensor.get("updated_at"))
+        lines.append(f"Sensor: {state}" + (f" • {age}" if age else ""))
+    else:
+        lines.append("Sensor: Unavailable")
+    if snap["outside_temperature_f"] is not None:
+        lines.append(f"Outside: {float(snap['outside_temperature_f']):g}°F")
+    if snap["next_schedule"]:
+        lines.append(f"Next: {snap['next_schedule']}")
+
+    if explain and enabled and room is not None:
+        error = round(target - float(room), 1)
+        distance = abs(error)
+        if distance <= deadband:
+            reason = "Room is inside the comfort band; Smart Room is stabilizing/holding."
+        else:
+            direction = "heating" if error > 0 else "cooling"
+            if distance < 3:
+                fan = "Low"
+            elif distance < 6:
+                fan = "Medium"
+            else:
+                fan = "High"
+            reason = f"Room is {distance:g}°F {'below' if error > 0 else 'above'} target; Smart Room is {direction} with {fan} correction."
+        lines.extend(["", "Why:", reason])
+
+    return "\n".join(lines)
+
+
+def _full_status_reply(result: dict[str, Any]) -> str:
+    return _status_reply(result) + "\n\n" + _smart_status_reply(result)
+
+
+def _set_smart_config(patch: dict[str, Any], label: str) -> dict[str, Any]:
+    config = save_smart_control_config(patch)
+    add_activity("sms", "smart_control", "success", f"{label}: {patch}")
+    return {"ok": True, "reply": f"✅ {label}\n" + _smart_status_reply()}
+
+
+def _handle_smart_command(command: str, raw_text: str) -> dict[str, Any] | None:
+    text = " ".join(command.upper().split())
+
+    if text in {"SMART STATUS", "SMART ROOM STATUS", "WHY", "WHY IS THE AC OFF", "WHAT IS SMART ROOM DOING"}:
+        try:
+            state = midea.status()
+            save_device_state(state, True, source="cloud")
+        except Exception:
+            state = None
+        return {"ok": True, "reply": _smart_status_reply(state, explain=True)}
+
+    if text in {"SMART ON", "SMART ROOM ON"}:
+        return _set_smart_config({"enabled": True, "comfort_since": None}, "Smart Room ON")
+
+    if text in {"SMART OFF", "SMART ROOM OFF"}:
+        return _set_smart_config({"enabled": False, "comfort_since": None}, "Smart Room OFF")
+
+    target_match = re.fullmatch(r"(?:SMART|TARGET|SMART TARGET)\s+(\d{2}(?:\.\d)?)", text)
+    if target_match:
+        target = float(target_match.group(1))
+        if target < 50 or target > 90:
+            return {"ok": False, "reply": "⚠️ Smart Room target must be between 50°F and 90°F."}
+        return _set_smart_config(
+            {"target_temperature_f": target, "active_preset": "custom", "comfort_since": None},
+            f"Smart target set to {target:g}°F",
+        )
+
+    preset_match = re.fullmatch(r"PRESET\s+(SUDAH|ALL\s*DAY|SLEEPING)", text)
+    if preset_match:
+        key = preset_match.group(1).replace(" ", "_").lower()
+        if key == "allday":
+            key = "all_day"
+        existing = load_smart_control_config()
+        preset_key = {
+            "sudah": "preset_sudah_f",
+            "all_day": "preset_all_day_f",
+            "sleeping": "preset_sleeping_f",
+        }[key]
+        target = float(existing.get(preset_key) or {"sudah": 74.0, "all_day": 73.0, "sleeping": 72.0}[key])
+        return _set_smart_config(
+            {"active_preset": key, "target_temperature_f": target, "comfort_since": None},
+            f"Preset {key.replace('_', ' ').title()} ({target:g}°F)",
+        )
+
+    mode_match = re.fullmatch(r"SMART\s+MODE\s+(AUTO|COOL|HEAT)", text)
+    if mode_match:
+        mode = mode_match.group(1).lower()
+        return _set_smart_config({"preferred_mode": mode, "comfort_since": None}, f"Smart mode {mode.title()}")
+
+    deadband_match = re.fullmatch(r"DEADBAND\s+(\d(?:\.\d)?)", text)
+    if deadband_match:
+        value = float(deadband_match.group(1))
+        if value < 0.5 or value > 5:
+            return {"ok": False, "reply": "⚠️ Deadband must be between 0.5°F and 5°F."}
+        return _set_smart_config({"deadband_f": value, "comfort_since": None}, f"Deadband ±{value:g}°F")
+
+    interval_match = re.fullmatch(r"INTERVAL\s+(\d{1,2})", text)
+    if interval_match:
+        value = int(interval_match.group(1))
+        if value < 1 or value > 60:
+            return {"ok": False, "reply": "⚠️ Interval must be between 1 and 60 minutes."}
+        return _set_smart_config({"min_command_interval_minutes": value}, f"Smart command interval {value} min")
+
+    if text in {"SENSOR", "ROOM SENSOR", "SENSOR STATUS"}:
+        snap = _smart_snapshot()
+        sensor = snap["sensor"]
+        if not sensor:
+            return {"ok": False, "reply": "⚠️ Room sensor is unavailable."}
+        room = snap["room_temperature_f"]
+        lines = ["🌡️ Room Sensor"]
+        if room is not None:
+            lines.append(f"Temperature: {room:g}°F")
+        if sensor.get("humidity") is not None:
+            lines.append(f"Humidity: {sensor['humidity']}%")
+        state = "Online" if sensor.get("online") is not False else "Offline"
+        age = _format_age(sensor.get("updated_at"))
+        lines.append(f"Status: {state}" + (f" • {age}" if age else ""))
+        return {"ok": True, "reply": "\n".join(lines)}
+
+    if text in {"NEXT SCHEDULE", "SCHEDULE NEXT"}:
+        nxt = _next_schedule_line()
+        return {"ok": True, "reply": f"📅 Next schedule\n{nxt}" if nxt else "📅 No enabled upcoming schedule found."}
+
+    return None
 
 
 def _execute(payload: dict[str, Any], label: str) -> dict[str, Any]:
@@ -768,6 +990,17 @@ For unrelated general questions, use kind=answer and briefly say this SMS assist
 
 Allowed canonical commands:
 STATUS
+SMART STATUS
+SMART ON
+SMART OFF
+SMART <50-90>
+TARGET <50-90>
+PRESET SUDAH|ALL DAY|SLEEPING
+SMART MODE AUTO|COOL|HEAT
+DEADBAND <0.5-5>
+INTERVAL <1-60>
+SENSOR
+NEXT SCHEDULE
 MODE
 ON
 OFF
@@ -872,7 +1105,10 @@ Examples:
 def _safe_ai_command(command: str) -> bool:
     text = " ".join((command or "").upper().split())
     patterns = [
-        r"STATUS", r"MODE", r"ON", r"OFF",
+        r"STATUS", r"SMART\s+STATUS", r"SMART\s+(?:ON|OFF)", r"(?:SMART|TARGET)\s+\d{2}(?:\.\d)?",
+        r"PRESET\s+(?:SUDAH|ALL\s*DAY|SLEEPING)", r"SMART\s+MODE\s+(?:AUTO|COOL|HEAT)",
+        r"DEADBAND\s+\d(?:\.\d)?", r"INTERVAL\s+\d{1,2}", r"SENSOR", r"NEXT\s+SCHEDULE",
+        r"MODE", r"ON", r"OFF",
         r"(?:TEMP|SET|TEMPERATURE)\s+\d{2}(?:\.\d)?",
         r"(?:COOL|HEAT)\s+\d{2}(?:\.\d)?",
         r"FAN\s+(?:AUTO|LOW|MEDIUM|HIGH)",
@@ -1043,6 +1279,32 @@ def process_text_command(raw: str) -> dict[str, Any]:
     if command == "AI STATUS":
         state = "On" if settings.openai_api_key else "Off"
         return {"ok": True, "reply": f"🤖 AI: {state}\nModel: {settings.openai_model}"}
+
+    smart_result = _handle_smart_command(command, raw_text)
+    if smart_result is not None:
+        return smart_result
+
+    natural_smart_map = [
+        (r"^(?:please )?(?:turn|switch) smart(?: room)? on$", "SMART ON"),
+        (r"^(?:please )?(?:turn|switch) smart(?: room)? off$", "SMART OFF"),
+        (r"^(?:what is|what's) smart room doing(?: right now)?\??$", "SMART STATUS"),
+        (r"^why is the ac off\??$", "SMART STATUS"),
+        (r"^(?:what is|what's) the room temperature\??$", "SENSOR"),
+        (r"^(?:use|set|switch to) sleeping(?: mode| preset)?$", "PRESET SLEEPING"),
+        (r"^(?:use|set|switch to) all day(?: mode| preset)?$", "PRESET ALL DAY"),
+        (r"^(?:use|set|switch to) sudah(?: mode| preset)?$", "PRESET SUDAH"),
+    ]
+    for pattern, canonical in natural_smart_map:
+        if re.fullmatch(pattern, natural):
+            smart_result = _handle_smart_command(canonical, raw_text)
+            if smart_result is not None:
+                return smart_result
+
+    room_target = re.fullmatch(r"(?:make|set) (?:the )?room (?:to )?(\d{2}(?:\.\d)?)", natural)
+    if room_target:
+        smart_result = _handle_smart_command(f"TARGET {room_target.group(1)}", raw_text)
+        if smart_result is not None:
+            return smart_result
 
     canonical_range = re.fullmatch(r"SCHEDULE\s+NEXT\s+(\d{1,2})\s+DAYS?", command)
     if canonical_range:
@@ -1233,7 +1495,7 @@ def process_text_command(raw: str) -> dict[str, Any]:
             mode_names = {1: "Auto", 2: "Cool", 3: "Dry", 4: "Heat", 5: "Fan"}
             code = result.get("mode")
             return {"ok": True, "reply": f"Mode {code} ({mode_names.get(code, 'Unknown')})."}
-        return {"ok": True, "reply": _status_reply(result)}
+        return {"ok": True, "reply": _full_status_reply(result)}
 
     if command == "OFF":
         return _execute({"action": "off"}, "OFF")
