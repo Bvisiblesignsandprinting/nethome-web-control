@@ -75,36 +75,10 @@ async function loadSmartControl(){
   const state=qs('#smart-control-state');
   try{
     const d=await jfetch('/api/smart-control');
-    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),mode=qs('#smart-control-mode'),preset=qs('#smart-control-preset'),sudah=qs('#smart-preset-sudah'),allDay=qs('#smart-preset-all-day'),sleeping=qs('#smart-preset-sleeping'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
-    if(enabled)enabled.value=String(Boolean(d.enabled));
-    if(target)target.value=d.target_temperature_f??73;
-    if(mode)mode.value=d.preferred_mode??'auto';
-    if(preset)preset.value=['sudah','all_day','sleeping'].includes(d.active_preset)?d.active_preset:'all_day';
-    if(sudah)sudah.value=d.preset_sudah_f??74;
-    if(allDay)allDay.value=d.preset_all_day_f??73;
-    if(sleeping)sleeping.value=d.preset_sleeping_f??72;
-    if(cal)cal.value=d.sensor_calibration_f??0;
-    if(deadband)deadband.value=d.deadband_f??1;
-    if(interval)interval.value=d.min_command_interval_minutes??5;
-    if(state){
-      const sensor=d.sensor;
-      const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      const outside=d.outside_temperature_f!=null?' · outside '+d.outside_temperature_f+'°F':'';
-      state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH'+outside+(updated?' · updated '+updated:''):'Sensor unavailable';
-      state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');
-    }
+    const enabled=qs('#smart-control-enabled'),target=qs('#smart-control-target'),mode=qs('#smart-control-mode'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
+    if(enabled)enabled.value=String(Boolean(d.enabled));if(target)target.value=d.target_temperature_f??72;if(mode)mode.value=d.preferred_mode??'auto';if(cal)cal.value=d.sensor_calibration_f??0;if(deadband)deadband.value=d.deadband_f??1;if(interval)interval.value=d.min_command_interval_minutes??5;
+    if(state){const sensor=d.sensor;const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';state.textContent=sensor&&sensor.ok?'Sensor '+sensor.temperature_f+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):'Sensor unavailable';state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');}
   }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}
-}
-
-function previewSmartPreset(){
-  const preset=qs('#smart-control-preset')?.value||'all_day';
-  const values={
-    sudah:Number(qs('#smart-preset-sudah')?.value||74),
-    all_day:Number(qs('#smart-preset-all-day')?.value||73),
-    sleeping:Number(qs('#smart-preset-sleeping')?.value||72)
-  };
-  const target=qs('#smart-control-target');
-  if(target&&Number.isFinite(values[preset]))target.value=values[preset];
 }
 
 async function saveSmartControl(){
@@ -112,19 +86,15 @@ async function saveSmartControl(){
   if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
   try{
     const enabled=qs('#smart-control-enabled')?.value==='true';
+    const target=Number(qs('#smart-control-target')?.value);
     const preferred_mode=qs('#smart-control-mode')?.value||'auto';
-    const active_preset=qs('#smart-control-preset')?.value||'all_day';
-    const preset_sudah_f=Number(qs('#smart-preset-sudah')?.value);
-    const preset_all_day_f=Number(qs('#smart-preset-all-day')?.value);
-    const preset_sleeping_f=Number(qs('#smart-preset-sleeping')?.value);
     const calibration=Number(qs('#smart-control-calibration')?.value);
     const deadband=Number(qs('#smart-control-deadband')?.value);
     const min_command_interval_minutes=Number(qs('#smart-control-interval')?.value);
-    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify({enabled,preferred_mode,active_preset,preset_sudah_f,preset_all_day_f,preset_sleeping_f,calibration_f:calibration,deadband_f:deadband,min_command_interval_minutes})});
+    await jfetch('/api/smart-control',{method:'POST',body:JSON.stringify({enabled,target_temperature:target,preferred_mode,calibration_f:calibration,deadband_f:deadband,min_command_interval_minutes})});
     await loadSmartControl();
   }catch(e){if(state){state.textContent=e.message;state.className='setting-state warning';}}finally{if(btn)btn.disabled=false;}
 }
-
 
 async function loadSchedules(){
   const d=await jfetch('/api/schedules');
@@ -198,7 +168,7 @@ const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click
 const gvSave=qs('#save-gv-config');if(gvSave)gvSave.addEventListener('click',saveGoogleVoiceConfig);
 const gvCopy=qs('#copy-gv-script');if(gvCopy)gvCopy.addEventListener('click',copyGoogleVoiceScript);
 qs('#schedule-ai-preview')?.addEventListener('click',previewAiSchedule);
-qs('#save-smart-control')?.addEventListener('click',saveSmartControl);qs('#smart-control-preset')?.addEventListener('change',previewSmartPreset);qs('#smart-preset-sudah')?.addEventListener('input',previewSmartPreset);qs('#smart-preset-all-day')?.addEventListener('input',previewSmartPreset);qs('#smart-preset-sleeping')?.addEventListener('input',previewSmartPreset);
+qs('#save-smart-control')?.addEventListener('click',saveSmartControl);
 qs('#add-schedule').addEventListener('click',()=>{resetForm();showForm();});
 qs('#cancel-schedule').addEventListener('click',hideForm);qs('#close-schedule').addEventListener('click',hideForm);qs('#schedule-type').addEventListener('change',updateScheduleTypeUI);
 qs('#schedule-list').addEventListener('change',e=>{const cb=e.target.closest('.schedule-check');if(!cb)return;const id=Number(cb.dataset.selectId);if(cb.checked)selectedScheduleIds.add(id);else selectedScheduleIds.delete(id);updateBulkScheduleUI();});
