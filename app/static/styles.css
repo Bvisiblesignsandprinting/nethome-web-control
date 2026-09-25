@@ -362,3 +362,225 @@ body[data-ac-theme] #settings{color:var(--ink)}
   #dashboard .temperature{font-size:58px}
   #dashboard .feature-row{grid-template-columns:repeat(3,1fr)}
 }
+
+
+/* Readability + Settings redesign */
+#dashboard .mode-tabs button,
+#dashboard .feature-row button,
+#dashboard .smart-preset-row button,
+#dashboard .smart-target-row>button,
+#dashboard .smart-toggle,
+#dashboard .soft-action{
+  text-shadow:0 1px 2px rgba(0,0,0,.32);
+}
+#dashboard .mode-tabs button{
+  background:rgba(10,20,42,.22);
+  border-color:rgba(255,255,255,.30);
+  color:#fff;
+}
+#dashboard .mode-tabs button.active{
+  background:rgba(255,255,255,.92);
+  color:var(--mode-deep);
+  text-shadow:none;
+  border-color:#fff;
+  box-shadow:0 9px 24px rgba(9,20,50,.22),inset 0 0 0 1px rgba(255,255,255,.35);
+}
+#dashboard .feature-row button{
+  background:rgba(10,20,42,.24);
+  border-color:rgba(255,255,255,.30);
+  color:#fff;
+}
+#dashboard .feature-row button:hover,
+#dashboard .feature-row button.active{
+  background:rgba(255,255,255,.88);
+  color:var(--mode-deep);
+  text-shadow:none;
+  border-color:#fff;
+}
+#dashboard .smart-preset-row button,
+#dashboard .smart-target-row>button,
+#dashboard .smart-toggle{
+  background:rgba(10,20,42,.22);
+  color:#fff;
+}
+#dashboard .smart-preset-row button.active,
+#dashboard .smart-toggle.active{
+  background:rgba(255,255,255,.90);
+  color:var(--mode-deep);
+  text-shadow:none;
+}
+#dashboard .soft-action{
+  background:rgba(255,255,255,.92);
+  color:var(--mode-deep);
+  text-shadow:none;
+  border-color:rgba(255,255,255,.94);
+}
+
+/* Give Settings the same premium web-app treatment without sacrificing form readability. */
+#settings{
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  border-radius:32px;
+  padding:28px;
+  background:
+    radial-gradient(circle at 88% 4%,rgba(255,255,255,.95) 0 8%,transparent 24%),
+    radial-gradient(circle at 8% 20%,rgba(255,255,255,.55) 0 10%,transparent 28%),
+    linear-gradient(145deg,#edf3fb 0%,#dce7f5 34%,#bacbe1 68%,#8da3bf 100%);
+  box-shadow:0 28px 70px rgba(29,45,72,.13);
+}
+#settings::before,
+#settings::after{
+  content:"";
+  position:absolute;
+  z-index:-1;
+  pointer-events:none;
+}
+#settings::before{
+  width:70%;
+  height:38%;
+  left:-20%;
+  top:2%;
+  border-radius:0 0 65% 0;
+  transform:rotate(-8deg);
+  background:linear-gradient(150deg,rgba(255,255,255,.82),rgba(173,191,216,.28));
+}
+#settings::after{
+  width:90%;
+  height:36%;
+  right:-25%;
+  bottom:-13%;
+  border-radius:58% 0 0 0;
+  transform:rotate(-7deg);
+  background:linear-gradient(145deg,rgba(255,255,255,.08) 0 24%,rgba(158,178,205,.42) 25% 49%,rgba(106,131,165,.40) 50% 100%);
+}
+#settings .page-head{
+  margin-bottom:22px;
+}
+#settings .page-head h1,
+#settings .page-head .eyebrow,
+#settings .page-head .lede{
+  color:#24384d;
+}
+#settings .page-head .eyebrow{opacity:.72}
+#settings .settings-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:18px;
+}
+#settings .setting-card{
+  background:linear-gradient(180deg,rgba(255,255,255,.82),rgba(255,255,255,.68));
+  border:1px solid rgba(255,255,255,.88);
+  border-radius:24px;
+  padding:22px;
+  box-shadow:0 15px 34px rgba(34,52,82,.10),inset 0 1px 0 rgba(255,255,255,.9);
+  backdrop-filter:blur(18px) saturate(118%);
+  -webkit-backdrop-filter:blur(18px) saturate(118%);
+}
+#settings .setting-card[style*="grid-column:1/-1"]{
+  grid-column:1/-1!important;
+}
+#settings .setting-icon{
+  background:linear-gradient(180deg,#fff,#edf3f8);
+  color:#324b63;
+  border:1px solid rgba(255,255,255,.95);
+  box-shadow:0 6px 18px rgba(40,61,92,.10);
+}
+#settings .setting-card h2,
+#settings .setting-card h3{
+  color:#23384d;
+}
+#settings .setting-card p,
+#settings .helper{
+  color:#667b8e;
+}
+#settings .smart-settings-summary>div{
+  background:rgba(238,244,250,.92);
+  border:1px solid #d6e2ec;
+}
+#settings .smart-settings-summary span{
+  color:#708497;
+}
+#settings .smart-settings-summary strong{
+  color:#263c52;
+}
+#settings .smart-settings-block{
+  border-top-color:#dce5ed;
+}
+#settings .field{
+  color:#4d6275;
+}
+#settings .field input,
+#settings .field select,
+#settings textarea{
+  background:#fff;
+  color:#1f3244;
+  border:1px solid #c9d6e1;
+  box-shadow:0 2px 7px rgba(35,54,79,.035);
+}
+#settings .field input:focus,
+#settings .field select:focus,
+#settings textarea:focus{
+  outline:3px solid rgba(60,112,168,.20);
+  border-color:#7899ba;
+}
+#settings .input-suffix span{
+  color:#62788d;
+}
+#settings button{
+  background:#243d55;
+  color:#fff;
+  border:1px solid #243d55;
+  text-shadow:none;
+}
+#settings button:hover{
+  background:#183147;
+  filter:none;
+}
+#settings button.secondary,
+#settings .secondary{
+  background:#fff!important;
+  color:#294158!important;
+  border:1px solid #b9c9d7!important;
+}
+#settings .smart-preset-row button{
+  background:#eaf1f7;
+  color:#294158;
+  border:1px solid #c7d6e3;
+}
+#settings .smart-preset-row button.active{
+  background:#294b6c;
+  color:#fff;
+  border-color:#294b6c;
+  box-shadow:0 7px 18px rgba(37,66,95,.15);
+}
+#settings .setting-state{
+  background:#e9f0f6;
+  color:#526b80;
+  border:1px solid #d5e1eb;
+}
+#settings .setting-state.ok-text{
+  background:#e5f5ec;
+  color:#26734f;
+  border-color:#c9ead8;
+}
+#settings .setting-state.warning{
+  background:#fff4d8;
+  color:#785919;
+  border-color:#f0dfb1;
+}
+#settings #gv-apps-script{
+  background:#182737;
+  color:#e9f4ff;
+  border-color:#263d54;
+}
+#settings #sms-webhook-url{
+  background:#f4f7fa;
+}
+@media(max-width:980px){
+  #settings .settings-grid{grid-template-columns:1fr}
+  #settings .setting-card[style*="grid-column:1/-1"]{grid-column:1!important}
+}
+@media(max-width:620px){
+  #settings{padding:20px 14px;border-radius:24px}
+  #settings .setting-card{padding:17px;border-radius:20px}
+}
