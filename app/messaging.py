@@ -187,7 +187,7 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
     if snap["outside_temperature_f"] is not None:
         lines.append(f"Outside: {float(snap['outside_temperature_f']):g}°F")
     if snap["next_schedule"]:
-        lines.append(f"Next: {snap['next_schedule']}")
+        lines.append(f"📅 Next: {snap['next_schedule']}")
 
     if explain and enabled and room is not None:
         error = round(target - float(room), 1)
@@ -233,34 +233,36 @@ def _full_status_reply(result: dict[str, Any]) -> str:
 
     lines = [
         "🏠 NetHome Status",
-        f"Smart: {'ON' if enabled else 'OFF'} • {preset} • Target {target:g}°F",
+        f"🧠 Smart: {'🟢 ON' if enabled else '⚫ OFF'} • 🎯 {target:g}°F • {preset}",
     ]
     room_parts = []
     if room is not None:
-        room_parts.append(f"Room {room:g}°F")
+        room_parts.append(f"🌡️ Room {room:g}°F")
     if humidity is not None:
-        room_parts.append(f"Humidity {humidity}%")
+        room_parts.append(f"💧 Humidity {humidity}%")
     if room_parts:
         lines.append(" • ".join(room_parts))
 
-    ac_parts = [f"AC {ac_power}", ac_mode]
+    mode_icon = {"Auto": "🔄", "Cool": "❄️", "Dry": "💧", "Heat": "🔥", "Fan": "💨"}.get(ac_mode, "🌬️")
+    ac_parts = [f"❄️ AC {ac_power}", f"{mode_icon} {ac_mode}"]
     if ac_set is not None:
-        ac_parts.append(f"Set {ac_set}°F")
+        ac_parts.append(f"🎚️ {ac_set}°F")
     if fan is not None:
-        ac_parts.append(f"Fan {fan}%")
+        ac_parts.append(f"💨 {fan}%")
     lines.append(" • ".join(ac_parts))
 
-    sensor_line = f"Sensor {sensor_state}"
+    sensor_icon = "📡" if sensor_state == "Online" else "⚠️"
+    sensor_line = f"{sensor_icon} Sensor {sensor_state}"
     if age:
         sensor_line += f" • {age}"
     if outside is not None:
-        sensor_line += f" • Outside {float(outside):g}°F"
+        sensor_line += f" • 🌤️ Outside {float(outside):g}°F"
     lines.append(sensor_line)
 
     if snap.get("next_schedule"):
         lines.append(f"Next: {snap['next_schedule']}")
 
-    lines.append("Text SMART STATUS for full details.")
+    lines.append("📲 Text SMART STATUS for full details.")
     return "\n".join(lines)
 
 
