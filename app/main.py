@@ -883,11 +883,16 @@ def smart_control_status():
 
     panel_config = {
         "enabled": bool(config.get("enabled")),
-        "target_temperature": float(config.get("target_temperature_f") or 72.0),
+        "target_temperature": float(config.get("target_temperature_f") or 73.0),
         "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
         "deadband_f": float(config.get("deadband_f") or 1.0),
         "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
         "preferred_mode": str(config.get("preferred_mode") or "auto"),
+        "preset_sudah_f": float(config.get("preset_sudah_f") or 74.0),
+        "preset_all_day_f": float(config.get("preset_all_day_f") or 73.0),
+        "preset_sleeping_f": float(config.get("preset_sleeping_f") or 72.0),
+        "active_preset": str(config.get("active_preset") or "all_day"),
+        "outside_temperature_f": config.get("outside_temperature_f"),
         "last_command_at": config.get("last_command_at"),
     }
     return {
@@ -899,6 +904,11 @@ def smart_control_status():
         "deadband_f": panel_config["deadband_f"],
         "min_command_interval_minutes": panel_config["min_command_interval_minutes"],
         "preferred_mode": panel_config["preferred_mode"],
+        "preset_sudah_f": panel_config["preset_sudah_f"],
+        "preset_all_day_f": panel_config["preset_all_day_f"],
+        "preset_sleeping_f": panel_config["preset_sleeping_f"],
+        "active_preset": panel_config["active_preset"],
+        "outside_temperature_f": panel_config["outside_temperature_f"],
         "last_command_at": panel_config["last_command_at"],
         "room_temperature_f": (
             round(float(sensor.get("temperature_f")) + panel_config["calibration_f"], 1)
@@ -921,6 +931,7 @@ def smart_control_update(body: SmartControlUpdate):
         patch["enabled"] = body.enabled
     if body.target_temperature is not None:
         patch["target_temperature_f"] = body.target_temperature
+        patch["active_preset"] = "custom"
     if body.calibration_f is not None:
         patch["sensor_calibration_f"] = body.calibration_f
     if body.deadband_f is not None:
@@ -929,22 +940,52 @@ def smart_control_update(body: SmartControlUpdate):
         patch["min_command_interval_minutes"] = body.min_command_interval_minutes
     if body.preferred_mode is not None:
         patch["preferred_mode"] = body.preferred_mode
+    if body.preset_sudah_f is not None:
+        patch["preset_sudah_f"] = body.preset_sudah_f
+    if body.preset_all_day_f is not None:
+        patch["preset_all_day_f"] = body.preset_all_day_f
+    if body.preset_sleeping_f is not None:
+        patch["preset_sleeping_f"] = body.preset_sleeping_f
+
+    if body.active_preset is not None:
+        patch["active_preset"] = body.active_preset
+        preset_values = {
+            "sudah": body.preset_sudah_f,
+            "all_day": body.preset_all_day_f,
+            "sleeping": body.preset_sleeping_f,
+        }
+        existing = load_smart_control_config()
+        preset_keys = {
+            "sudah": "preset_sudah_f",
+            "all_day": "preset_all_day_f",
+            "sleeping": "preset_sleeping_f",
+        }
+        chosen = preset_values.get(body.active_preset)
+        if chosen is None:
+            chosen = existing.get(preset_keys[body.active_preset])
+        patch["target_temperature_f"] = float(chosen)
+        patch["comfort_since"] = None
+
     config = save_smart_control_config(patch) if patch else load_smart_control_config()
     add_activity(
         "smart-control-config",
         "update",
         "success",
-        f"enabled={config.get('enabled')} target={config.get('target_temperature_f')} calibration={config.get('sensor_calibration_f')}",
+        f"enabled={config.get('enabled')} target={config.get('target_temperature_f')} preset={config.get('active_preset')} calibration={config.get('sensor_calibration_f')}",
     )
     return {
         "ok": True,
         "config": {
             "enabled": bool(config.get("enabled")),
-            "target_temperature": float(config.get("target_temperature_f") or 72.0),
+            "target_temperature": float(config.get("target_temperature_f") or 73.0),
             "calibration_f": float(config.get("sensor_calibration_f") or 0.0),
             "deadband_f": float(config.get("deadband_f") or 1.0),
             "min_command_interval_minutes": int(config.get("min_command_interval_minutes") or 5),
             "preferred_mode": str(config.get("preferred_mode") or "auto"),
+            "preset_sudah_f": float(config.get("preset_sudah_f") or 74.0),
+            "preset_all_day_f": float(config.get("preset_all_day_f") or 73.0),
+            "preset_sleeping_f": float(config.get("preset_sleeping_f") or 72.0),
+            "active_preset": str(config.get("active_preset") or "all_day"),
             "last_command_at": config.get("last_command_at"),
         },
     }
