@@ -209,7 +209,59 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
 
 
 def _full_status_reply(result: dict[str, Any]) -> str:
-    return _status_reply(result) + "\n\n" + _smart_status_reply(result)
+    snap = _smart_snapshot(result)
+    config = snap["config"]
+    sensor = snap["sensor"] or {}
+    mode_names = {1: "Auto", 2: "Cool", 3: "Dry", 4: "Heat", 5: "Fan"}
+
+    def _f(c):
+        return None if c is None else round((float(c) * 9 / 5) + 32)
+
+    enabled = bool(config.get("enabled"))
+    target = float(config.get("target_temperature_f") or 73.0)
+    preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
+    room = snap.get("room_temperature_f")
+    humidity = sensor.get("humidity")
+    sensor_state = "Online" if sensor and sensor.get("online") is not False else "Offline" if sensor else "Unavailable"
+    age = _format_age(sensor.get("updated_at")) if sensor else None
+
+    ac_power = "On" if result.get("running") else "Off"
+    ac_mode = mode_names.get(result.get("mode"), "Unknown")
+    ac_set = _f(result.get("target_temperature_c"))
+    fan = result.get("fan_speed")
+    outside = snap.get("outside_temperature_f")
+
+    lines = [
+        "🏠 NetHome Status",
+        f"Smart: {'ON' if enabled else 'OFF'} • {preset} • Target {target:g}°F",
+    ]
+    room_parts = []
+    if room is not None:
+        room_parts.append(f"Room {room:g}°F")
+    if humidity is not None:
+        room_parts.append(f"Humidity {humidity}%")
+    if room_parts:
+        lines.append(" • ".join(room_parts))
+
+    ac_parts = [f"AC {ac_power}", ac_mode]
+    if ac_set is not None:
+        ac_parts.append(f"Set {ac_set}°F")
+    if fan is not None:
+        ac_parts.append(f"Fan {fan}%")
+    lines.append(" • ".join(ac_parts))
+
+    sensor_line = f"Sensor {sensor_state}"
+    if age:
+        sensor_line += f" • {age}"
+    if outside is not None:
+        sensor_line += f" • Outside {float(outside):g}°F"
+    lines.append(sensor_line)
+
+    if snap.get("next_schedule"):
+        lines.append(f"Next: {snap['next_schedule']}")
+
+    lines.append("Text SMART STATUS for full details.")
+    return "\n".join(lines)
 
 
 def _set_smart_config(patch: dict[str, Any], label: str) -> dict[str, Any]:
