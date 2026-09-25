@@ -72,6 +72,33 @@
 
           <div id="status-detail" class="simple-message">Checking the live AC status will enable available controls.</div>
 
+          <section class="smart-room-panel" aria-label="Smart Room controls">
+            <div class="smart-room-head">
+              <div>
+                <p class="eyebrow">SMART ROOM</p>
+                <h2>Room comfort control</h2>
+              </div>
+              <button type="button" id="dashboard-smart-toggle" class="smart-toggle">Loading…</button>
+            </div>
+            <div class="smart-live-grid">
+              <div><span>🌡️ Room</span><strong id="dashboard-smart-room">--°F</strong></div>
+              <div><span>🎯 Target</span><strong id="dashboard-smart-target">--°F</strong></div>
+              <div><span>💧 Humidity</span><strong id="dashboard-smart-humidity">--%</strong></div>
+              <div><span>🌤️ Outside</span><strong id="dashboard-smart-outside">--°F</strong></div>
+            </div>
+            <div class="smart-preset-row" aria-label="Smart Room presets">
+              <button type="button" data-smart-preset="sudah">Sudah <small id="dashboard-preset-sudah">74°F</small></button>
+              <button type="button" data-smart-preset="all_day">All Day <small id="dashboard-preset-all-day">73°F</small></button>
+              <button type="button" data-smart-preset="sleeping">Sleeping <small id="dashboard-preset-sleeping">72°F</small></button>
+            </div>
+            <div class="smart-target-row">
+              <button type="button" id="dashboard-smart-down" aria-label="Lower Smart Room target">−</button>
+              <div><span>Custom target</span><strong id="dashboard-smart-custom">73°F</strong></div>
+              <button type="button" id="dashboard-smart-up" aria-label="Raise Smart Room target">+</button>
+            </div>
+            <div id="dashboard-smart-detail" class="smart-room-detail">Loading Smart Room status…</div>
+          </section>
+
           <div class="feature-row">
             <button type="button" id="fan-speed-btn"><span>🌀</span><small>Fan Speed</small><em id="fan-speed-value">--</em></button>
             <button type="button" id="horizontal-btn"><span>↔</span><small>Left / Right</small></button>
@@ -213,28 +240,67 @@
             <div style="width:100%">
               <h2>Smart Room Control</h2>
               <p>Use the Tuya room sensor as the true room temperature. NetHome automatically trims the Midea setpoint in the background to hold the room target without rapid command changes.</p>
-              <div class="form-grid three" style="margin-top:14px">
-                <label class="field">Smart control
-                  <select id="smart-control-enabled"><option value="false">Off</option><option value="true">On</option></select>
-                </label>
-                <label class="field">Room target
-                  <div class="input-suffix"><input id="smart-control-target" type="number" min="50" max="90" step="1"><span>°F</span></div>
-                </label>
-                <label class="field">Preferred mode
-                  <select id="smart-control-mode"><option value="auto">Auto</option><option value="cool">Cool only</option><option value="heat">Heat only</option></select>
-                </label>
-                <label class="field">Sensor calibration
-                  <div class="input-suffix"><input id="smart-control-calibration" type="number" min="-5" max="5" step="0.5"><span>°F</span></div>
-                </label>
-                <label class="field">Comfort deadband
-                  <div class="input-suffix"><input id="smart-control-deadband" type="number" min="0.5" max="5" step="0.5"><span>°F</span></div>
-                </label>
-                <label class="field">Minimum time between AC changes
-                  <div class="input-suffix"><input id="smart-control-interval" type="number" min="1" max="30" step="1"><span>min</span></div>
-                </label>
+              <div class="smart-settings-summary" id="smart-settings-summary">
+                <div><span>🌡️ Room</span><strong id="settings-room-temp">--°F</strong></div>
+                <div><span>🎯 Active target</span><strong id="settings-active-target">--°F</strong></div>
+                <div><span>📡 Sensor</span><strong id="settings-sensor-status">Loading…</strong></div>
+                <div><span>🕒 Last AC change</span><strong id="settings-last-command">--</strong></div>
               </div>
+
+              <div class="smart-settings-block">
+                <h3>Quick control</h3>
+                <div class="form-grid three">
+                  <label class="field">Smart control
+                    <select id="smart-control-enabled"><option value="false">Off</option><option value="true">On</option></select>
+                  </label>
+                  <label class="field">Custom room target
+                    <div class="input-suffix"><input id="smart-control-target" type="number" min="50" max="90" step="0.5"><span>°F</span></div>
+                  </label>
+                  <div class="field"><span>Apply target</span><button type="button" id="apply-smart-target" class="secondary">Use custom target</button></div>
+                </div>
+                <div class="smart-preset-row settings-presets">
+                  <button type="button" data-settings-preset="sudah">Use Sudah</button>
+                  <button type="button" data-settings-preset="all_day">Use All Day</button>
+                  <button type="button" data-settings-preset="sleeping">Use Sleeping</button>
+                </div>
+              </div>
+
+              <div class="smart-settings-block">
+                <h3>Preset temperatures</h3>
+                <div class="form-grid three">
+                  <label class="field">Sudah preset
+                    <div class="input-suffix"><input id="smart-preset-sudah" type="number" min="50" max="90" step="0.5"><span>°F</span></div>
+                  </label>
+                  <label class="field">All Day preset
+                    <div class="input-suffix"><input id="smart-preset-all-day" type="number" min="50" max="90" step="0.5"><span>°F</span></div>
+                  </label>
+                  <label class="field">Sleeping preset
+                    <div class="input-suffix"><input id="smart-preset-sleeping" type="number" min="50" max="90" step="0.5"><span>°F</span></div>
+                  </label>
+                </div>
+              </div>
+
+              <div class="smart-settings-block">
+                <h3>Adaptive control</h3>
+                <div class="form-grid three">
+                  <label class="field">Preferred mode
+                    <select id="smart-control-mode"><option value="auto">Auto</option><option value="cool">Cool only</option><option value="heat">Heat only</option></select>
+                  </label>
+                  <label class="field">Sensor calibration
+                    <div class="input-suffix"><input id="smart-control-calibration" type="number" min="-5" max="5" step="0.5"><span>°F</span></div>
+                  </label>
+                  <label class="field">Comfort deadband
+                    <div class="input-suffix"><input id="smart-control-deadband" type="number" min="0.5" max="5" step="0.5"><span>°F</span></div>
+                  </label>
+                  <label class="field">Minimum time between AC changes
+                    <div class="input-suffix"><input id="smart-control-interval" type="number" min="1" max="30" step="1"><span>min</span></div>
+                  </label>
+                </div>
+                <p class="helper">Adaptive fan logic is automatic: Low when under 3°F from target, Medium at 3–6°F, and High at 6°F or more. Raw Midea setpoint changes stay gradual.</p>
+              </div>
+
               <div class="form-actions" style="justify-content:flex-start">
-                <button type="button" id="save-smart-control">Save smart control</button>
+                <button type="button" id="save-smart-control">Save Smart Room settings</button>
                 <span id="smart-control-state" class="setting-state">Loading…</span>
               </div>
             </div>

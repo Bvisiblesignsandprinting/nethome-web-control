@@ -94,3 +94,32 @@
 .ai-preview-row .sub{font-size:12px;color:#71828a;line-height:1.5;margin-top:4px}
 .ai-confirm-bar{display:flex;gap:10px;align-items:center;justify-content:flex-end;flex-wrap:wrap;padding-top:6px}
 .ai-confirm-bar span{margin-right:auto;color:#62757d;font-size:12px;font-weight:800}
+
+
+/* Smart Room dashboard + settings */
+.smart-room-panel{margin-top:22px;padding:22px;border:1px solid rgba(255,255,255,.09);border-radius:24px;background:linear-gradient(180deg,rgba(255,255,255,.045),rgba(255,255,255,.018));box-shadow:inset 0 1px 0 rgba(255,255,255,.035)}
+.smart-room-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+.smart-room-head h2{margin:3px 0 0;font-size:22px}
+.smart-toggle{border-radius:999px;padding:10px 16px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12)}
+.smart-toggle.active{background:rgba(46,204,113,.12);border-color:rgba(46,204,113,.35)}
+.smart-live-grid,.smart-settings-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}
+.smart-live-grid>div,.smart-settings-summary>div{padding:14px 15px;border-radius:16px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.06)}
+.smart-live-grid span,.smart-settings-summary span{display:block;color:var(--muted);font-size:12px;margin-bottom:5px}
+.smart-live-grid strong,.smart-settings-summary strong{font-size:18px}
+.smart-preset-row{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-top:14px}
+.smart-preset-row button{display:flex;justify-content:center;align-items:center;gap:8px;min-height:48px;border-radius:15px;background:rgba(255,255,255,.055);border:1px solid rgba(255,255,255,.09)}
+.smart-preset-row button small{opacity:.72}
+.smart-preset-row button.active{background:rgba(91,155,255,.16);border-color:rgba(91,155,255,.42);box-shadow:inset 0 0 0 1px rgba(91,155,255,.08)}
+.smart-target-row{display:grid;grid-template-columns:54px 1fr 54px;align-items:center;gap:10px;margin-top:14px}
+.smart-target-row>button{height:52px;border-radius:16px;font-size:26px}
+.smart-target-row>div{text-align:center;padding:9px 14px;border-radius:15px;background:rgba(255,255,255,.04)}
+.smart-target-row span{display:block;color:var(--muted);font-size:12px}
+.smart-target-row strong{font-size:20px}
+.smart-room-detail{margin-top:14px;padding:12px 14px;border-radius:14px;background:rgba(255,255,255,.035);color:var(--muted);line-height:1.45}
+.smart-settings-summary{margin-top:14px}
+.smart-settings-block{margin-top:18px;padding-top:18px;border-top:1px solid rgba(255,255,255,.08)}
+.smart-settings-block h3{margin:0 0 12px;font-size:16px}
+.settings-presets{margin-top:12px}
+.field>button.secondary{margin-top:8px;width:100%}
+@media (max-width:900px){.smart-live-grid,.smart-settings-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:620px){.smart-room-head{align-items:flex-start;flex-direction:column}.smart-live-grid,.smart-settings-summary,.smart-preset-row{grid-template-columns:1fr}.smart-target-row{grid-template-columns:50px 1fr 50px}}
