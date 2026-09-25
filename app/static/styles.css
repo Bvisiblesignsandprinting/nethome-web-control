@@ -126,12 +126,12 @@
 
 
 /* Website-only mode visual system. The ESP32/device UI is intentionally untouched. */
-body[data-ac-theme="off"]{--mode-a:#dfe7f0;--mode-b:#aab7c8;--mode-c:#eef3f8;--mode-deep:#75869b;--mode-glow:rgba(190,205,222,.44)}
-body[data-ac-theme="auto"]{--mode-a:#d64cff;--mode-b:#9d16df;--mode-c:#f4c6ff;--mode-deep:#7712a8;--mode-glow:rgba(224,84,255,.38)}
-body[data-ac-theme="cool"]{--mode-a:#4e8dff;--mode-b:#153ee3;--mode-c:#c9ddff;--mode-deep:#1027a7;--mode-glow:rgba(50,108,255,.42)}
-body[data-ac-theme="heat"]{--mode-a:#ff7b45;--mode-b:#ef3d00;--mode-c:#ffd4bd;--mode-deep:#b52b00;--mode-glow:rgba(255,95,32,.42)}
-body[data-ac-theme="fan"]{--mode-a:#45ee73;--mode-b:#00bd28;--mode-c:#cbffd5;--mode-deep:#00891d;--mode-glow:rgba(38,222,86,.38)}
-body[data-ac-theme="dry"]{--mode-a:#54e7eb;--mode-b:#08bfc4;--mode-c:#d5ffff;--mode-deep:#078f96;--mode-glow:rgba(41,215,220,.38)}
+body[data-ac-theme="off"]{--mode-a:#9ba9bc;--mode-b:#627389;--mode-c:#c7d0db;--mode-deep:#46566b;--mode-glow:rgba(104,121,145,.48)}
+body[data-ac-theme="auto"]{--mode-a:#b72de3;--mode-b:#7612ad;--mode-c:#dfa4ef;--mode-deep:#5c0e86;--mode-glow:rgba(174,55,221,.44)}
+body[data-ac-theme="cool"]{--mode-a:#2f68e8;--mode-b:#0d2ba9;--mode-c:#9fbdf4;--mode-deep:#0a1f78;--mode-glow:rgba(37,84,210,.48)}
+body[data-ac-theme="heat"]{--mode-a:#e95c27;--mode-b:#b92f00;--mode-c:#efae8f;--mode-deep:#812100;--mode-glow:rgba(205,72,22,.48)}
+body[data-ac-theme="fan"]{--mode-a:#25c750;--mode-b:#078f27;--mode-c:#9fe3af;--mode-deep:#05661c;--mode-glow:rgba(27,164,61,.46)}
+body[data-ac-theme="dry"]{--mode-a:#2bbcc2;--mode-b:#087b85;--mode-c:#9edce0;--mode-deep:#075961;--mode-glow:rgba(26,154,161,.46)}
 
 #dashboard{
   position:relative;
@@ -140,10 +140,11 @@ body[data-ac-theme="dry"]{--mode-a:#54e7eb;--mode-b:#08bfc4;--mode-c:#d5ffff;--m
   border-radius:34px;
   padding:26px;
   background:
-    radial-gradient(circle at 82% 5%,rgba(255,255,255,.94) 0 7%,transparent 25%),
-    radial-gradient(circle at 8% 16%,rgba(255,255,255,.54) 0 11%,transparent 29%),
+    linear-gradient(rgba(8,18,38,.16),rgba(8,18,38,.16)),
+    radial-gradient(circle at 82% 5%,rgba(255,255,255,.58) 0 7%,transparent 25%),
+    radial-gradient(circle at 8% 16%,rgba(255,255,255,.24) 0 11%,transparent 29%),
     radial-gradient(circle at 72% 42%,var(--mode-glow) 0 10%,transparent 31%),
-    linear-gradient(145deg,var(--mode-c) 0%,rgba(255,255,255,.78) 26%,var(--mode-a) 58%,var(--mode-b) 100%);
+    linear-gradient(145deg,var(--mode-c) 0%,rgba(255,255,255,.28) 26%,var(--mode-a) 58%,var(--mode-b) 100%);
   box-shadow:0 28px 70px rgba(29,45,72,.16);
   transition:background .55s ease,box-shadow .55s ease;
 }
@@ -583,4 +584,32 @@ body[data-ac-theme] #settings{color:var(--ink)}
 @media(max-width:620px){
   #settings{padding:20px 14px;border-radius:24px}
   #settings .setting-card{padding:17px;border-radius:20px}
+}
+
+/* Extra contrast for light areas of the mode artwork */
+#dashboard .simple-ac{
+  background:linear-gradient(180deg,rgba(10,20,42,.23),rgba(10,20,42,.14));
+}
+#dashboard .simple-ac::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  pointer-events:none;
+  border-radius:30px;
+  background:linear-gradient(180deg,rgba(4,12,28,.06),rgba(4,12,28,.16));
+  z-index:0;
+}
+#dashboard .simple-ac>*{position:relative;z-index:1}
+#dashboard .simple-ac-top h1,
+#dashboard .simple-weather,
+#dashboard .simple-online,
+#dashboard .temperature,
+#dashboard .temperature small,
+#dashboard .fan-label,
+#dashboard .power-state,
+#dashboard .simple-message,
+#dashboard .smart-room-panel,
+#dashboard .feature-row button,
+#dashboard .mode-tabs button{
+  text-shadow:0 2px 4px rgba(0,0,0,.38);
 }
