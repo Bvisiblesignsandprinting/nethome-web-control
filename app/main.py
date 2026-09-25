@@ -58,6 +58,7 @@ from .models import (
     SmsConfigUpdate,
 )
 from .scheduler import run_due_schedules
+from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
 
 BASE = Path(__file__).resolve().parent
@@ -69,6 +70,7 @@ SESSION_VALUE = "authenticated-v1"
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    apply_requested_smart_room_schedule()
     async with nethome_mcp.session_manager.run():
         yield
 
