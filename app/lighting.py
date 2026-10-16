@@ -82,6 +82,12 @@ class ZoneWrite(BaseModel):
     command: Command
 
 
+class LinkWrite(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    revision: StrictInt = Field(ge=0)
+    enabled: StrictBool
+
+
 class LightingSchedule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
@@ -169,6 +175,7 @@ def snapshot(value):
         "revision": value["revision"], "hardware_ready": False,
         "connection": "not_connected", "delivery": "preview_only",
         "message": "Settings and schedules are saved. Lights will respond after the hardware is connected.",
+        "links": value["links"],
         "zones": [{**zone, "desired": value["zones"][zone["id"]], "reported": None,
                    "connection": "not_connected"} for zone in ZONE_DEFINITIONS],
         "schedules": [{**s, "status": "waiting_for_connection" if s["enabled"] else "disabled",
@@ -195,7 +202,21 @@ def lighting_router(auth):
         validate_zone_command(zone_id, body.command)
         def update(value):
             value["zones"][zone_id].update(body.command.model_dump(exclude_none=True))
+            if value["links"]["walls_waterfall"] and zone_id in ("rgb-walls", "rgb-waterfall"):
+                peer = "rgb-waterfall" if zone_id == "rgb-walls" else "rgb-walls"
+                value["zones"][peer].update(body.command.model_dump(exclude_none=True))
         return snapshot(document(update, revision=body.revision, action="zone_" + zone_id))
+
+    @router.patch("/links/walls-waterfall")
+    def update_walls_waterfall_link(body: LinkWrite):
+        def update(value):
+            value["links"]["walls_waterfall"] = body.enabled
+            if body.enabled:
+                # Walls are the initial source when pairing; future changes on
+                # either card are mirrored in both directions.
+                value["zones"]["rgb-waterfall"] = deepcopy(value["zones"]["rgb-walls"])
+        from copy import deepcopy
+        return snapshot(document(update, revision=body.revision, action="link_walls_waterfall"))
 
     @router.post("/schedules/preview")
     def preview(body: LightingSchedule):

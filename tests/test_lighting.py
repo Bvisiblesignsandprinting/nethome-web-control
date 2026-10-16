@@ -31,6 +31,7 @@ def test_routes_require_login(client):
     client.app.dependency_overrides.clear()
     for method, path, body in [
         ("GET", "", None), ("PATCH", "/zones/rgb-walls", {"revision": 0, "command": {"power": True}}),
+        ("PATCH", "/links/walls-waterfall", {"revision": 0, "enabled": True}),
         ("POST", "/schedules", {"revision": 0, "schedule": schedule()}),
         ("POST", "/schedules/preview", schedule()),
         ("PUT", "/schedules/missing", {"revision": 0, "schedule": schedule()}),
@@ -44,6 +45,7 @@ def test_defaults_are_unconnected_and_no_rows_created_by_reading(client):
     assert r.status_code == 200 and r.headers['cache-control'] == 'no-store'
     value = r.json()
     assert value['revision'] == 0 and not value['hardware_ready'] and value['delivery'] == 'preview_only'
+    assert value['links'] == {'walls_waterfall': False}
     assert [z['id'] for z in value['zones']] == list(lighting.ZONES)
     assert all(z['reported'] is None and z['connection'] == 'not_connected' for z in value['zones'])
     assert db.list_activity() == []
@@ -90,6 +92,27 @@ def test_custom_fade_and_color_balance_persist(client):
     assert saved['colors'] == ['#FF0000','#00FF00','#0000FF']
     assert saved['red_balance'] == 155 and saved['cycle_seconds'] == 30
     assert client.get('/api/lighting').json()['zones'][1]['desired']['effect'] == saved
+
+
+def test_walls_and_waterfall_can_link_and_follow_each_other(client):
+    linked = client.patch('/api/lighting/links/walls-waterfall', json={'revision':0,'enabled':True})
+    assert linked.status_code == 200, linked.text
+    assert linked.json()['links']['walls_waterfall'] is True
+    walls, waterfall = linked.json()['zones'][:2]
+    assert walls['desired'] == waterfall['desired']
+
+    command = {'power':True,'brightness':42,'effect':{'mode':'fade','colors':['#FF0000','#0000FF'],'cycle_seconds':20,'transition':100,'red_balance':150,'green_balance':100,'blue_balance':100}}
+    changed = client.patch('/api/lighting/zones/rgb-waterfall', json={'revision':1,'command':command})
+    assert changed.status_code == 200, changed.text
+    assert changed.json()['zones'][0]['desired'] == changed.json()['zones'][1]['desired']
+    assert changed.json()['zones'][0]['desired']['effect']['red_balance'] == 150
+
+    unlinked = client.patch('/api/lighting/links/walls-waterfall', json={'revision':2,'enabled':False})
+    assert unlinked.status_code == 200 and not unlinked.json()['links']['walls_waterfall']
+    separate = client.patch('/api/lighting/zones/rgb-waterfall', json={'revision':3,'command':{'brightness':77}})
+    assert separate.status_code == 200
+    assert separate.json()['zones'][0]['desired']['brightness'] == 42
+    assert separate.json()['zones'][1]['desired']['brightness'] == 77
 
 
 @pytest.mark.parametrize('effect', [
