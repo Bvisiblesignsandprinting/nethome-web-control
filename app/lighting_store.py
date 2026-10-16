@@ -21,7 +21,10 @@ ZONE_DEFINITIONS = (
 
 def defaults():
     return {"version": 1, "revision": 0, "zones": {
-        z["id"]: ({"power": False, "brightness": 80, "color": "#45A5FF"}
+        z["id"]: ({"power": False, "brightness": 80, "color": "#45A5FF", "effect": {
+            "mode": "solid", "colors": [], "cycle_seconds": 12, "transition": 100,
+            "red_balance": 140, "green_balance": 100, "blue_balance": 100,
+        }}
                   if z["kind"] == "rgbw" else {"power": False})
         for z in ZONE_DEFINITIONS
     }, "schedules": []}
@@ -35,6 +38,12 @@ def _decode(row):
         assert value["version"] == 1 and type(value["revision"]) is int
         assert isinstance(value["zones"], dict) and isinstance(value["schedules"], list)
         assert set(value["zones"]) == {z["id"] for z in ZONE_DEFINITIONS}
+        # Older saved lighting drafts predate effects. Enrich them in memory so
+        # website and panel clients receive one stable shape without a migration.
+        effect_default = defaults()["zones"]["rgb-walls"]["effect"]
+        for zone in ZONE_DEFINITIONS:
+            if zone["kind"] == "rgbw":
+                value["zones"][zone["id"]].setdefault("effect", deepcopy(effect_default))
         return value
     except (ValueError, TypeError, KeyError, AssertionError):
         raise HTTPException(503, "Saved lighting settings need repair; no changes were made.")

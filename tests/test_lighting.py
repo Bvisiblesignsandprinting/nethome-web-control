@@ -53,7 +53,9 @@ def test_zone_settings_persist_without_touching_ac_queue(client):
     payload = {"revision": 0, "command": {"power": True, "color": "#12ab34", "brightness": 0}}
     r = client.patch('/api/lighting/zones/rgb-walls', json=payload)
     assert r.status_code == 200, r.text
-    assert r.json()['zones'][0]['desired'] == {"power": True, "color": "#12AB34", "brightness": 0}
+    desired = r.json()['zones'][0]['desired']
+    assert {k: desired[k] for k in ('power','color','brightness')} == {"power": True, "color": "#12AB34", "brightness": 0}
+    assert desired['effect']['mode'] == 'solid' and desired['effect']['red_balance'] == 140
     assert client.get('/api/lighting').json() == r.json()
     assert r.json()['zones'][0]['reported'] is None
     assert db.list_schedules() == []
@@ -77,6 +79,30 @@ def test_regular_lights_support_only_power_and_unknown_zone_rejected(client):
     assert client.patch('/api/lighting/zones/roof', json={'revision': 0, 'command': {'power': True}}).status_code == 404
     r = client.patch('/api/lighting/zones/chandeliers', json={'revision': 0, 'command': {'power': True}})
     assert r.status_code == 200 and r.json()['zones'][3]['desired'] == {'power': True}
+
+
+def test_custom_fade_and_color_balance_persist(client):
+    effect = {"mode":"fade", "colors":["#ff0000","#00ff00","#0000ff"], "cycle_seconds":30,
+              "transition":100, "red_balance":155, "green_balance":100, "blue_balance":95}
+    r = client.patch('/api/lighting/zones/rgb-waterfall', json={'revision':0,'command':{'power':True,'brightness':65,'effect':effect}})
+    assert r.status_code == 200, r.text
+    saved = r.json()['zones'][1]['desired']['effect']
+    assert saved['colors'] == ['#FF0000','#00FF00','#0000FF']
+    assert saved['red_balance'] == 155 and saved['cycle_seconds'] == 30
+    assert client.get('/api/lighting').json()['zones'][1]['desired']['effect'] == saved
+
+
+@pytest.mark.parametrize('effect', [
+    {'mode':'fade','colors':['#FF0000']},
+    {'mode':'blink','colors':['#FF0000','#0000FF'],'transition':50},
+    {'mode':'fade','colors':['red','#0000FF']},
+    {'mode':'fade','colors':['#FF0000','#0000FF'],'red_balance':201},
+    {'mode':'strobe','colors':['#FF0000','#0000FF']},
+])
+def test_invalid_effects_never_write(client, effect):
+    r = client.patch('/api/lighting/zones/rgb-walls', json={'revision':0,'command':{'effect':effect}})
+    assert r.status_code == 422
+    assert client.get('/api/lighting').json()['revision'] == 0
 
 
 def test_stale_revision_does_not_overwrite(client):
