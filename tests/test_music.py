@@ -84,6 +84,28 @@ def test_upload_uses_unique_object_and_only_exposes_signed_url(authenticated, st
     assert calls[1][2] == {}
 
 
+def test_folder_upload_preserves_safe_relative_path(authenticated, storage, monkeypatch):
+    def request(method, path, payload=None):
+        return bucket() if path.startswith('/bucket/') else {'url': path + '?token=upload-ticket'}
+    monkeypatch.setattr(storage, 'request', request)
+    response = authenticated.post('/api/music/uploads', json={
+        'filename': 'My Song.mp3', 'size': 1000,
+        'relative_path': 'The Artist/First Album/My Song.mp3',
+    })
+    assert response.status_code == 200
+    assert response.json()['id'].startswith('The-Artist/First-Album/')
+    assert response.json()['id'].endswith('_My-Song.mp3')
+
+
+@pytest.mark.parametrize('relative_path', ['../song.mp3', 'Artist/../song.mp3', '/song.mp3/', 'A/B/C/D/E/F/G/H/I/song.mp3'])
+def test_unsafe_folder_path_is_rejected(authenticated, storage, monkeypatch, relative_path):
+    monkeypatch.setattr(storage, 'request', lambda *args: pytest.fail('Invalid path reached storage'))
+    response = authenticated.post('/api/music/uploads', json={
+        'filename': 'song.mp3', 'size': 10, 'relative_path': relative_path,
+    })
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize('changes', [{'public': True}, {'file_size_limit': None},
     {'file_size_limit': music.MAX_FILE_BYTES + 1}, {'allowed_mime_types': ['*/*']}])
 def test_insecure_bucket_blocks_upload(authenticated, storage, monkeypatch, changes):
@@ -91,18 +113,19 @@ def test_insecure_bucket_blocks_upload(authenticated, storage, monkeypatch, chan
     assert authenticated.post('/api/music/uploads', json={'filename': 'song.mp3', 'size': 10}).status_code == 503
 
 
-def test_paginated_tracks_ignore_folders_and_foreign_paths(authenticated, storage, monkeypatch):
+def test_tracks_walk_folders_and_ignore_foreign_files(authenticated, storage, monkeypatch):
     name = 'a' * 32 + '_My-Song.mp3'
     def request(method, path, payload=None):
         if path.startswith('/bucket/'):
             return bucket()
-        assert payload['offset'] == 100
-        return [{'name': name, 'id': 'object-id', 'metadata': {'size': 1200}},
-                {'name': 'foreign.mp3', 'id': 'other'}, {'name': 'folder', 'id': None}]
+        if payload['prefix'] == 'tracks/':
+            return [{'name': 'The-Artist', 'id': None}, {'name': 'foreign.mp3', 'id': 'other'}]
+        assert payload['prefix'] == 'tracks/The-Artist/'
+        return [{'name': name, 'id': 'object-id', 'metadata': {'size': 1200}}]
     monkeypatch.setattr(storage, 'request', request)
-    result = authenticated.get('/api/music/tracks?offset=100').json()
+    result = authenticated.get('/api/music/tracks').json()
     assert result['next_offset'] is None
-    assert result['tracks'] == [{'id': name, 'title': 'My Song', 'size': 1200, 'created_at': None}]
+    assert result['tracks'] == [{'id': 'The-Artist/' + name, 'title': 'My Song', 'folder': 'The-Artist', 'size': 1200, 'created_at': None}]
     assert authenticated.get('/api/music/tracks?offset=-1').status_code == 422
 
 
@@ -120,6 +143,19 @@ def test_playback_checks_existence_and_issues_expiring_url(authenticated, storag
     assert calls[1][1].startswith('/object/info/')
     assert calls[2][2] == {'expiresIn': 3600}
     assert response.json()['playback_device'] == 'browser'
+
+
+def test_nested_track_playback_route(authenticated, storage, monkeypatch):
+    name = 'Artist/Album/' + 'a' * 32 + '_song.mp3'
+    def request(method, path, payload=None):
+        if path.startswith('/bucket/'):
+            return bucket()
+        if method == 'GET':
+            return {'id': 'object-id'}
+        return {'signedURL': '/object/sign/nethome-music/tracks/' + name + '?token=play-ticket'}
+    monkeypatch.setattr(storage, 'request', request)
+    response = authenticated.post('/api/music/tracks/' + name + '/playback')
+    assert response.status_code == 200
 
 
 def test_delete_is_limited_to_music_prefix(authenticated, storage, monkeypatch):

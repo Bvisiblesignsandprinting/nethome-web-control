@@ -267,22 +267,25 @@
       </section>
 
       <section id="music" class="view" aria-labelledby="music-title">
-        <div class="page-head"><div><p class="eyebrow">YOUR LIBRARY</p><h1 id="music-title">Music</h1><p class="lede">Upload MP3 files and choose what to play.</p></div><button id="music-refresh" class="secondary" type="button">Refresh</button></div>
+        <div class="page-head"><div><p class="eyebrow">YOUR LIBRARY</p><h1 id="music-title">Music</h1><p class="lede">Songs, artists and albums in one organized library.</p></div><button id="music-refresh" class="secondary icon-button" type="button" aria-label="Refresh music"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 1-2.34-5.66M20 4v6h-6"/></svg><span>Refresh</span></button></div>
         <div class="card music-player">
-          <h2 id="music-now-playing">Choose a song</h2>
-          <p>Playing on this browser’s audio output. Bluetooth playback through the wall panel is not available yet.</p>
-          <audio id="music-audio" controls preload="none" aria-label="Music player"></audio>
-          <div class="music-actions"><button id="music-previous" type="button" class="secondary" disabled>Previous</button><button id="music-next" type="button" class="secondary" disabled>Next</button></div>
+          <div class="music-art" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="2.5"/><path d="M12 3v6"/></svg></div>
+          <div class="music-player-main"><p class="music-kicker">NOW PLAYING</p><h2 id="music-now-playing">Choose a song</h2><p id="music-now-folder">Select a track from your library</p>
+            <audio id="music-audio" controls preload="none" aria-label="Music player"></audio>
+            <div class="music-actions"><button id="music-previous" type="button" class="secondary transport" disabled aria-label="Previous song"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 6l-9 6 9 6z"/></svg></button><button id="music-next" type="button" class="secondary transport" disabled aria-label="Next song"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 6l9 6-9 6z"/></svg></button></div>
+          </div>
         </div>
         <form id="music-upload" class="card music-upload">
-          <label for="music-files">Add music</label>
-          <p>MP3 files only · up to 25 MB per file</p>
-          <input id="music-files" type="file" accept=".mp3,audio/mpeg" multiple required disabled>
-          <button id="music-upload-button" type="submit" disabled>Upload music</button>
+          <div><p class="music-kicker">ADD TO LIBRARY</p><h2>Upload music</h2><p>MP3 files only · up to 25 MB per song. Folder upload keeps artist and album folders.</p></div>
+          <input id="music-files" class="visually-hidden" type="file" accept=".mp3,audio/mpeg" multiple disabled>
+          <input id="music-folder" class="visually-hidden" type="file" accept=".mp3,audio/mpeg" webkitdirectory directory multiple disabled>
+          <div class="music-upload-actions"><label class="button secondary icon-button" for="music-files"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l10-2v13M9 9l10-2M6 21a3 2 0 1 0 0-4 3 2 0 0 0 0 4zm10-2a3 2 0 1 0 0-4 3 2 0 0 0 0 4z"/></svg><span>Choose songs</span></label><label class="button secondary icon-button" for="music-folder"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h7l2 2h9v11H3z"/><path d="M12 11v5m-2-3h4"/></svg><span>Choose folder</span></label><span id="music-selection">Nothing selected</span></div>
+          <button id="music-upload-button" type="submit" disabled>Upload selected music</button>
           <progress id="music-progress" max="100" value="0" hidden aria-label="Upload progress"></progress>
         </form>
         <p id="music-state" role="status" aria-live="polite">Open Music to load your library.</p>
-        <div id="music-library" class="card" aria-label="Music library"></div>
+        <div class="music-library-head"><div><p class="music-kicker">LIBRARY</p><h2>Your music</h2></div><label class="music-search"><span class="visually-hidden">Search music</span><input id="music-search" type="search" placeholder="Search songs or folders"></label></div>
+        <div id="music-library" class="music-library" aria-label="Music library"></div>
         <button id="music-load-more" type="button" class="secondary" hidden>Load more songs</button>
       </section>
 

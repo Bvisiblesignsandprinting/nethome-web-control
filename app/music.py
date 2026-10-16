@@ -19,12 +19,14 @@ from pydantic import BaseModel, Field, field_validator
 from .config import settings
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
-OBJECT_PATTERN = re.compile(r"^[0-9a-f]{32}_[A-Za-z0-9_.-]{1,120}\.mp3$")
+FILE_PATTERN = re.compile(r"^[0-9a-f]{32}_[A-Za-z0-9_.-]{1,120}\.mp3$")
+SEGMENT_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{1,80}$")
 
 
 class UploadRequest(BaseModel):
     filename: str = Field(min_length=5, max_length=240)
     size: int = Field(gt=0, le=MAX_FILE_BYTES, strict=True)
+    relative_path: str | None = Field(default=None, max_length=720)
 
     @field_validator("filename")
     @classmethod
@@ -35,15 +37,41 @@ class UploadRequest(BaseModel):
             raise ValueError("Invalid filename")
         return value
 
+    @field_validator("relative_path")
+    @classmethod
+    def safe_relative_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.replace("\\", "/")
+        if value.startswith("/") or value.endswith("/"):
+            raise ValueError("Invalid music folder path")
+        parts = value.split("/")
+        if len(parts) > 9 or not parts or parts[-1].lower().endswith(".mp3") is False:
+            raise ValueError("Invalid music folder path")
+        if any(not part or part in {".", ".."} or any(ord(c) < 32 for c in part) for part in parts):
+            raise ValueError("Invalid music folder path")
+        return value
 
-def object_name(filename: str) -> str:
-    stem = unicodedata.normalize("NFKD", filename[:-4]).encode("ascii", "ignore").decode()
+
+def safe_segment(value: str, limit: int = 80) -> str:
+    value = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
+    return re.sub(r"[^A-Za-z0-9_.-]+", "-", value).strip(".-_")[:limit] or "Music"
+
+
+def object_name(filename: str, relative_path: str | None = None) -> str:
+    path = (relative_path or filename).replace("\\", "/").strip("/")
+    parts = path.split("/")
+    stem = unicodedata.normalize("NFKD", parts[-1][:-4]).encode("ascii", "ignore").decode()
     stem = re.sub(r"[^A-Za-z0-9_.-]+", "-", stem).strip(".-_")[:100] or "Music"
-    return f"{uuid4().hex}_{stem}.mp3"
+    folders = [safe_segment(part) for part in parts[:-1]][:8]
+    leaf = f"{uuid4().hex}_{stem}.mp3"
+    return "/".join([*folders, leaf])
 
 
 def validate_object(name: str) -> str:
-    if not OBJECT_PATTERN.fullmatch(name):
+    parts = name.split("/")
+    if (len(parts) > 9 or not FILE_PATTERN.fullmatch(parts[-1]) or
+            any(not SEGMENT_PATTERN.fullmatch(part) or part in {".", ".."} for part in parts[:-1])):
         raise HTTPException(404, "Track not found")
     return name
 
@@ -96,25 +124,48 @@ class MusicStorage:
             raise HTTPException(502, "Music storage returned an invalid URL")
         return self.origin + "/storage/v1" + path
 
+    def _walk_tracks(self, prefix: str = "tracks/", depth: int = 0) -> list[dict]:
+        if depth > 8:
+            return []
+        found: list[dict] = []
+        page = 0
+        while page < 50:
+            rows = self.request("POST", f"/object/list/{self.bucket}", {
+                "prefix": prefix, "limit": 100, "offset": page * 100,
+                "sortBy": {"column": "name", "order": "asc"},
+            })
+            for row in rows:
+                name = row.get("name", "")
+                if row.get("id"):
+                    relative = prefix[7:] + name
+                    try:
+                        validate_object(relative)
+                    except HTTPException:
+                        continue
+                    found.append({**row, "relative": relative})
+                elif SEGMENT_PATTERN.fullmatch(name or "") and name not in {".", ".."}:
+                    found.extend(self._walk_tracks(prefix + name + "/", depth + 1))
+            if len(rows) < 100:
+                break
+            page += 1
+        return found
+
     def tracks(self, offset: int):
         self.check_bucket()
-        rows = self.request("POST", f"/object/list/{self.bucket}", {
-            "prefix": "tracks/", "limit": 100, "offset": offset,
-            "sortBy": {"column": "created_at", "order": "desc"},
-        })
+        rows = sorted(self._walk_tracks(), key=lambda row: row.get("created_at") or "", reverse=True)
         tracks = []
-        for row in rows:
-            name = row.get("name", "")
-            if not OBJECT_PATTERN.fullmatch(name) or not row.get("id"):
-                continue
-            tracks.append({"id": name, "title": name[33:-4].replace("-", " "),
+        for row in rows[offset:offset + 100]:
+            name = row["relative"]
+            leaf = name.rsplit("/", 1)[-1]
+            folder = name.rsplit("/", 1)[0] if "/" in name else "Unsorted"
+            tracks.append({"id": name, "title": leaf[33:-4].replace("-", " "), "folder": folder,
                            "size": (row.get("metadata") or {}).get("size", 0),
                            "created_at": row.get("created_at")})
-        return {"tracks": tracks, "next_offset": offset + len(rows) if len(rows) == 100 else None}
+        return {"tracks": tracks, "next_offset": offset + 100 if offset + 100 < len(rows) else None}
 
     def upload(self, body: UploadRequest):
         self.check_bucket()
-        name = object_name(body.filename)
+        name = object_name(body.filename, body.relative_path)
         result = self.request("POST", f"/object/upload/sign/{self.bucket}/tracks/{name}", {})
         return {"id": name, "upload_url": self.absolute_signed_url(result["url"]),
                 "max_file_bytes": MAX_FILE_BYTES}
@@ -158,12 +209,12 @@ def music_router(auth: Callable) -> APIRouter:
         response.headers["Cache-Control"] = "no-store"
         return storage.upload(body)
 
-    @router.post("/tracks/{track_id}/playback")
+    @router.post("/tracks/{track_id:path}/playback")
     def playback(track_id: str, response: Response):
         response.headers["Cache-Control"] = "no-store"
         return storage.playback(track_id)
 
-    @router.delete("/tracks/{track_id}")
+    @router.delete("/tracks/{track_id:path}")
     def delete(track_id: str):
         return storage.delete(track_id)
 
