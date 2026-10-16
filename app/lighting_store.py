@@ -20,7 +20,7 @@ ZONE_DEFINITIONS = (
 
 
 def defaults():
-    return {"version": 1, "revision": 0, "zones": {
+    return {"version": 1, "revision": 0, "links": {"walls_waterfall": False}, "zones": {
         z["id"]: ({"power": False, "brightness": 80, "color": "#45A5FF", "effect": {
             "mode": "solid", "colors": [], "cycle_seconds": 12, "transition": 100,
             "red_balance": 140, "green_balance": 100, "blue_balance": 100,
@@ -38,6 +38,8 @@ def _decode(row):
         assert value["version"] == 1 and type(value["revision"]) is int
         assert isinstance(value["zones"], dict) and isinstance(value["schedules"], list)
         assert set(value["zones"]) == {z["id"] for z in ZONE_DEFINITIONS}
+        value.setdefault("links", {"walls_waterfall": False})
+        assert set(value["links"]) == {"walls_waterfall"} and type(value["links"]["walls_waterfall"]) is bool
         # Older saved lighting drafts predate effects. Enrich them in memory so
         # website and panel clients receive one stable shape without a migration.
         effect_default = defaults()["zones"]["rgb-walls"]["effect"]

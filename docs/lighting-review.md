@@ -6,11 +6,13 @@ All changes currently save previews. Hardware state stays unknown, every zone sa
 
 ## Validation completed
 
-- Complete Python suite: 68 passed.
+- Complete Python suite: 69 passed.
 - JavaScript syntax check: passed.
 - UI script exercised through a DOM emulator against the real API/SQLite test server: RGB save/reload; retention of other-zone drafts; weekly timing preview; schedule create/edit/disable/delete; regular-light capabilities; no AC requests or script errors.
 - Revision conflicts, concurrent updates, input validation, authentication and DST timing covered by tests.
 - No schema migration, new credentials or dependency changes are needed.
+
+Walls and Waterfall can be linked bidirectionally so power, color, brightness and effects saved on either zone apply to both. The link is part of the shared API document for the future touchscreen.
 
 The temporary Google Voice bridge has also been retired now that direct Twilio SMS is connected. Its settings card, configuration endpoints, generated Apps Script, and inbound webhook are removed. The Twilio webhook and saved SMS configuration remain unchanged.
 

@@ -58,10 +58,16 @@
   }
 
   function render(savedZoneId = null) {
+    const cleared = new Set(savedZoneId && data.links.walls_waterfall && ['rgb-walls','rgb-waterfall'].includes(savedZoneId) ? ['rgb-walls','rgb-waterfall'] : savedZoneId ? [savedZoneId] : []);
     const drafts = new Map([...$('lighting-zones').querySelectorAll('form[data-dirty]')]
-      .filter(card => card.dataset.zone !== savedZoneId)
+      .filter(card => !cleared.has(card.dataset.zone))
       .map(card => [card.dataset.zone, Object.fromEntries([...card.elements].filter(e => e.name).map(e => [e.name, e.value]))]));
     $('lighting-zones').innerHTML = data.zones.map(zoneMarkup).join('');
+    const linked = data.links.walls_waterfall;
+    $('lighting-link-toggle').textContent = linked ? 'Unlink zones' : 'Link zones';
+    $('lighting-link-toggle').classList.toggle('linked', linked);
+    $('lighting-link-detail').textContent = linked ? 'Linked: changes to Walls or Waterfall are saved to both zones.' : 'Separate: each colored-light zone keeps its own settings.';
+    $('lighting-link-toggle').disabled = false;
     for (const card of $('lighting-zones').querySelectorAll('form')) {
       card.addEventListener('input', () => {
         card.dataset.dirty = 'true';
@@ -226,6 +232,11 @@
   });
   $('lighting-cancel').addEventListener('click', () => { form.hidden = true; editingId = null; previewGeneration++; });
   $('lighting-add').addEventListener('click', () => openForm());
+  $('lighting-link-toggle').addEventListener('click', () => {
+    if (!data) return;
+    const enabled = !data.links.walls_waterfall;
+    if (!enabled || confirm('Link Walls and Waterfall? The current Walls settings will be copied to Waterfall.')) mutate('/links/walls-waterfall', 'PATCH', {enabled});
+  });
   $('lighting-refresh').addEventListener('click', load);
   document.querySelector('[data-view="lighting"]').addEventListener('click', load);
 })();

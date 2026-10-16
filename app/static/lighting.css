@@ -1,6 +1,9 @@
 .lighting-notice{background:#fff8e9;border:1px solid #ead8af;padding:18px 22px;border-radius:16px;color:#75561b;margin-bottom:16px}
 .lighting-notice p{margin:7px 0 0;line-height:1.5;font-size:14px}
 #lighting-state{font-size:13px;color:var(--muted);min-height:22px}
+.lighting-link{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:10px 0 20px}
+.lighting-link h2{margin:2px 0 7px}.lighting-link p{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
+.lighting-link button.linked{background:#1f647d;color:#fff;border-color:#1f647d}
 .lighting-zones{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}
 .lighting-zone{min-width:0}
 .lighting-zone-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}
@@ -51,5 +54,5 @@
 #lighting [hidden]{display:none!important}
 #lighting button:disabled{opacity:.5}
 @media(max-width:980px){.sidebar nav{grid-template-columns:repeat(6,minmax(70px,1fr))}}
-@media(max-width:620px){.lighting-zones{grid-template-columns:1fr}.lighting-section-head,.lighting-schedule{display:grid}.lighting-section-head>button{width:100%}.lighting-schedule-actions button{flex:1}.lighting-zone-head{gap:8px}.lighting-notice{padding:16px}.sidebar nav{grid-template-columns:repeat(6,minmax(74px,1fr))}.lighting-form .form-actions{flex-wrap:wrap}.lighting-effect-grid,.lighting-balance{grid-template-columns:1fr}.lighting-balance strong,.lighting-balance p{grid-column:auto}}
+@media(max-width:620px){.lighting-zones{grid-template-columns:1fr}.lighting-link,.lighting-section-head,.lighting-schedule{display:grid}.lighting-link button,.lighting-section-head>button{width:100%}.lighting-schedule-actions button{flex:1}.lighting-zone-head{gap:8px}.lighting-notice{padding:16px}.sidebar nav{grid-template-columns:repeat(6,minmax(74px,1fr))}.lighting-form .form-actions{flex-wrap:wrap}.lighting-effect-grid,.lighting-balance{grid-template-columns:1fr}.lighting-balance strong,.lighting-balance p{grid-column:auto}}
 @media(prefers-reduced-motion:reduce){.lighting-swatch.effect-fade,.lighting-swatch.effect-pulse,.lighting-swatch.effect-blink{animation:none}}

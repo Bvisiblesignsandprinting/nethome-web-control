@@ -36,3 +36,7 @@ The complete Python suite passed (61 tests). A DOM-based interaction check again
 ## RGB effects
 
 Each RGB zone stores a hardware-independent effect definition shared by website and future wall-panel clients. Modes are solid, fade, pulse, and blink. Effects carry two to eight colors, a 1–120 second cycle, transition softness, and independent red/green/blue balance from 50–200%. The default red balance is 140% to compensate for the installed strips appearing dimmer on red. Presets remain editable and are saved as ordinary effect values, so later gateway adapters do not depend on website-only preset names.
+
+## RGB zone linking
+
+`links.walls_waterfall` is part of the shared lighting document. Enabling it copies the current Walls settings to Waterfall. While enabled, a zone update from either side is mirrored atomically to both RGB zones under the same document revision. Unlinking preserves the last shared state and returns to independent updates. The link is exposed in the API snapshot for website, touchscreen, and hardware-adapter clients.
