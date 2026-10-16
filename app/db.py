@@ -270,70 +270,6 @@ def save_email_bridge_config(data: dict[str, Any]) -> None:
 
 
 
-def load_google_voice_config() -> dict[str, Any]:
-    """Load private Google Voice bridge settings."""
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                """
-                select details
-                from public.activity
-                where source = 'google-voice-config' and action = 'settings' and result = 'active'
-                order by id desc
-                limit 1
-                """
-            )
-            row = _normalize_row(cur.fetchone())
-    else:
-        with _sqlite_conn() as conn:
-            raw = conn.execute(
-                """
-                select details
-                from activity
-                where source = 'google-voice-config' and action = 'settings' and result = 'active'
-                order by id desc
-                limit 1
-                """
-            ).fetchone()
-        row = dict(raw) if raw else None
-
-    if not row:
-        return {}
-    try:
-        value = json.loads(row.get("details") or "{}")
-    except Exception:
-        return {}
-    return value if isinstance(value, dict) else {}
-
-
-def save_google_voice_config(data: dict[str, Any]) -> None:
-    payload = json.dumps(data, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "delete from public.activity where source = 'google-voice-config' and action = 'settings'"
-            )
-            cur.execute(
-                """
-                insert into public.activity(source, action, result, details)
-                values ('google-voice-config', 'settings', 'active', %s)
-                """,
-                (payload,),
-            )
-        return
-
-    with _sqlite_conn() as conn:
-        conn.execute(
-            "delete from activity where source = 'google-voice-config' and action = 'settings'"
-        )
-        conn.execute(
-            """
-            insert into activity(created_at, source, action, result, details)
-            values (?, 'google-voice-config', 'settings', 'active', ?)
-            """,
-            (_now(), payload),
-        )
-
 def load_smart_control_config() -> dict[str, Any]:
     defaults = {
         "enabled": False,
@@ -636,14 +572,14 @@ def list_activity(limit: int = 50) -> list[dict[str, Any]]:
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config') order by id desc limit %s",
+                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config', 'lighting-config') order by id desc limit %s",
                 (limit,),
             )
             return [_normalize_row(r) for r in cur.fetchall()]
 
     with _sqlite_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config') ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config', 'lighting-config') ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 

@@ -2,7 +2,8 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "git": {
     "deploymentEnabled": {
-      "feature/music-library": false
+      "feature/music-library": false,
+      "feature/lighting-software": false
     }
   },
   "functions": {

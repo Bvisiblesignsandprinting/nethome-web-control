@@ -80,11 +80,6 @@ class EmailBridgeConfigUpdate(BaseModel):
     rotate_webhook_secret: bool = False
 
 
-class GoogleVoiceConfigUpdate(BaseModel):
-    allowed_phone: str = Field(min_length=7, max_length=30)
-    rotate_bridge_secret: bool = False
-
-
 class SmartControlToggle(BaseModel):
     enabled: bool
 
