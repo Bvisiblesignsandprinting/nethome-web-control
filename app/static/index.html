@@ -242,7 +242,7 @@
           <h2 id="lighting-form-title">New lighting schedule</h2>
           <div class="form-grid">
             <label>Schedule name<input name="name" required maxlength="80" placeholder="Evening lights"></label>
-            <label>Lighting group<select name="zone_id" id="lighting-schedule-zone" required></select></label>
+            <fieldset class="lighting-group-picker"><legend>Lighting groups</legend><div id="lighting-schedule-zones"></div></fieldset>
             <label>Action<select name="power"><option value="true">Turn on</option><option value="false">Turn off</option></select></label>
             <label>Repeat<select name="repeat" id="lighting-repeat"><option value="daily">Every day</option><option value="weekly">Selected weekdays</option><option value="one_time">One specific date</option></select></label>
             <label>Time<input name="time_local" type="time" required value="18:00"></label>

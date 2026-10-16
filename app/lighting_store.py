@@ -46,6 +46,9 @@ def _decode(row):
         for zone in ZONE_DEFINITIONS:
             if zone["kind"] == "rgbw":
                 value["zones"][zone["id"]].setdefault("effect", deepcopy(effect_default))
+        for schedule in value["schedules"]:
+            if "zone_ids" not in schedule and schedule.get("zone_id"):
+                schedule["zone_ids"] = [schedule.pop("zone_id")]
         return value
     except (ValueError, TypeError, KeyError, AssertionError):
         raise HTTPException(503, "Saved lighting settings need repair; no changes were made.")

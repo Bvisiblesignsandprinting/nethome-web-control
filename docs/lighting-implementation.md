@@ -40,3 +40,7 @@ Each RGB zone stores a hardware-independent effect definition shared by website 
 ## RGB zone linking
 
 `links.walls_waterfall` is part of the shared lighting document. Enabling it copies the current Walls settings to Waterfall. While enabled, a zone update from either side is mirrored atomically to both RGB zones under the same document revision. Unlinking preserves the last shared state and returns to independent updates. The link is exposed in the API snapshot for website, touchscreen, and hardware-adapter clients.
+
+## Multi-group schedules
+
+Lighting schedules store `zone_ids`, a unique list of one to four groups. The schedule form renders one checkbox per group, allowing Walls + Roof and Chandeliers—or any other combination—to share one on/off time. Existing `zone_id` schedules are converted in memory to a one-item `zone_ids` list and persist in the new shape on the next write. RGB settings are available when at least one selected group supports RGB; switch-only combinations accept power only.

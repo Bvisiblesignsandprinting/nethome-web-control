@@ -42,6 +42,7 @@
 .lighting-weekdays{border:0;padding:15px 0;display:flex;flex-wrap:wrap;gap:15px}
 .lighting-weekdays legend{font-size:13px;font-weight:750;color:#526874}
 .lighting-weekdays label,.lighting-enabled{display:flex!important;align-items:center;gap:7px!important}
+.lighting-group-picker{border:0;padding:0;margin:0;grid-column:1/-1}.lighting-group-picker legend{font-size:13px;font-weight:750;color:#526874;margin-bottom:9px}.lighting-group-picker>div{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}.lighting-group-picker label{display:flex!important;align-items:center;gap:8px!important;padding:11px;border:1px solid #d5dee3;border-radius:10px}.lighting-group-picker input{width:18px;height:18px;accent-color:#1f647d}
 .lighting-enabled{font-weight:500!important;margin:18px 0}
 .lighting-enabled input,.lighting-weekdays input{width:18px;height:18px;accent-color:#1f647d}
 .lighting-preview{padding:15px;background:#eef6f9;border-radius:10px;font-size:13px;line-height:1.7;margin-top:18px;color:#315467}
