@@ -17,6 +17,7 @@
       <nav aria-label="Primary navigation">
         <button class="nav active" data-view="dashboard"><span>⌂</span>Dashboard</button>
         <button class="nav" data-view="schedules"><span>◷</span>Schedules</button>
+        <button class="nav" data-view="music"><span aria-hidden="true">♫</span>Music</button>
         <button class="nav" data-view="activity"><span>≡</span>Activity</button>
         <button class="nav" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
@@ -228,6 +229,26 @@
         </form>
       </section>
 
+      <section id="music" class="view" aria-labelledby="music-title">
+        <div class="page-head"><div><p class="eyebrow">YOUR LIBRARY</p><h1 id="music-title">Music</h1><p class="lede">Upload MP3 files and choose what to play.</p></div><button id="music-refresh" class="secondary" type="button">Refresh</button></div>
+        <div class="card music-player">
+          <h2 id="music-now-playing">Choose a song</h2>
+          <p>Playing on this browser’s audio output. Bluetooth playback through the wall panel is not available yet.</p>
+          <audio id="music-audio" controls preload="none" aria-label="Music player"></audio>
+          <div class="music-actions"><button id="music-previous" type="button" class="secondary" disabled>Previous</button><button id="music-next" type="button" class="secondary" disabled>Next</button></div>
+        </div>
+        <form id="music-upload" class="card music-upload">
+          <label for="music-files">Add music</label>
+          <p>MP3 files only · up to 25 MB per file</p>
+          <input id="music-files" type="file" accept=".mp3,audio/mpeg" multiple required disabled>
+          <button id="music-upload-button" type="submit" disabled>Upload music</button>
+          <progress id="music-progress" max="100" value="0" hidden aria-label="Upload progress"></progress>
+        </form>
+        <p id="music-state" role="status" aria-live="polite">Open Music to load your library.</p>
+        <div id="music-library" class="card" aria-label="Music library"></div>
+        <button id="music-load-more" type="button" class="secondary" hidden>Load more songs</button>
+      </section>
+
       <section id="activity" class="view">
         <div class="page-head"><div><p class="eyebrow">AUDIT LOG</p><h1>Activity</h1><p class="lede">Every status check, schedule change, and future ChatGPT command appears here.</p></div><button id="refresh-activity" class="secondary">↻ Refresh</button></div>
         <div id="activity-list" class="activity-list"></div>
@@ -357,5 +378,7 @@
     </main>
   </div>
   <script src="/static/app.js"></script>
+  <script src="/static/music.js"></script>
 </body>
 </html>
+

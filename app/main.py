@@ -60,6 +60,7 @@ from .models import (
 from .scheduler import run_due_schedules
 from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
+from .music import music_router
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -109,6 +110,9 @@ def access_auth(
         if authorization == f"Bearer {expected}":
             return
     raise HTTPException(status_code=401, detail="Login required")
+
+
+app.include_router(music_router(access_auth))
 
 
 class LoginRequest(BaseModel):
@@ -1363,3 +1367,4 @@ Welcome to NetHome AC Control. This private service sends HVAC status, weather-b
 <div class="box"><strong>Enrollment confirmation:</strong><br>
 NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.</div>
 </body></html>"""
+

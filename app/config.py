@@ -53,6 +53,10 @@ class Settings:
     panel_firmware_sha256: str | None = os.getenv("NETHOME_PANEL_FIRMWARE_SHA256") or None
     panel_firmware_notes: str = os.getenv("NETHOME_PANEL_FIRMWARE_NOTES", "")
     panel_config_json: str = os.getenv("NETHOME_PANEL_CONFIG_JSON", "{}")
+    music_storage_url: str = os.getenv("NETHOME_MUSIC_STORAGE_URL", "").rstrip("/")
+    music_storage_key: str = os.getenv("NETHOME_MUSIC_STORAGE_KEY", "")
+    music_bucket: str = os.getenv("NETHOME_MUSIC_BUCKET", "nethome-music")
 
 
 settings = Settings()
+

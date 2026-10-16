@@ -1,8 +1,14 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "git": {
+    "deploymentEnabled": {
+      "feature/music-library": false
+    }
+  },
   "functions": {
     "app/main.py": {
       "maxDuration": 60
     }
   }
 }
+
