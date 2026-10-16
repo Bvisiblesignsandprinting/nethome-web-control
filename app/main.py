@@ -31,12 +31,10 @@ from .db import (
     list_activity,
     list_schedules,
     load_email_bridge_config,
-    load_google_voice_config,
     load_sms_config,
     load_smart_control_config,
     save_device_state,
     save_email_bridge_config,
-    save_google_voice_config,
     save_sms_config,
     save_smart_control_config,
     update_schedule,
@@ -47,7 +45,6 @@ from .messaging import process_text_command
 from .models import (
     DeviceCommand,
     EmailBridgeConfigUpdate,
-    GoogleVoiceConfigUpdate,
     ScheduleCreate,
     SchedulePromptRequest,
     ScheduleUpdate,
@@ -61,6 +58,7 @@ from .scheduler import run_due_schedules
 from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
 from .music import music_router
+from .lighting import lighting_router
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -113,6 +111,7 @@ def access_auth(
 
 
 app.include_router(music_router(access_auth))
+app.include_router(lighting_router(access_auth))
 
 
 class LoginRequest(BaseModel):
@@ -267,299 +266,6 @@ def _email_bridge_config_with_secret() -> dict:
     return config
 
 
-def _google_voice_config_with_secret() -> dict:
-    config = load_google_voice_config()
-    secret = str(config.get("bridge_secret") or "")
-    if not secret:
-        secret = secrets.token_urlsafe(32)
-        config["bridge_secret"] = secret
-        save_google_voice_config(config)
-    return config
-
-
-def _google_voice_apps_script(base_url: str, secret: str, allowed_phone: str) -> str:
-    phone_digits = "".join(ch for ch in allowed_phone if ch.isdigit())[-10:]
-    endpoint = f"{base_url}/api/message/google-voice?token={secret}"
-    return f"""const NETHOME_ENDPOINT = {json.dumps(endpoint)};
-const ALLOWED_PHONE = {json.dumps(phone_digits)};
-
-function b64urlDecode(input) {{
-  if (!input) return '';
-  let s = String(input).replace(/-/g, '+').replace(/_/g, '/');
-  while (s.length % 4) s += '=';
-  return Utilities.newBlob(Utilities.base64Decode(s)).getDataAsString();
-}}
-
-function b64urlEncode(input) {{
-  return Utilities.base64EncodeWebSafe(String(input), Utilities.Charset.UTF_8).replace(/=+$/g, '');
-}}
-
-function gmailApi(path, options) {{
-  const opts = options || {{}};
-  opts.headers = Object.assign({{
-    Authorization: 'Bearer ' + ScriptApp.getOAuthToken()
-  }}, opts.headers || {{}});
-  opts.muteHttpExceptions = true;
-  const res = UrlFetchApp.fetch('https://gmail.googleapis.com/gmail/v1/users/me/' + path, opts);
-  const code = res.getResponseCode();
-  const raw = res.getContentText() || '{{}}';
-  if (code < 200 || code >= 300) throw new Error('Gmail API ' + code + ': ' + raw.slice(0, 300));
-  return JSON.parse(raw);
-}}
-
-function headerValue(headers, name) {{
-  const target = String(name).toLowerCase();
-  const h = (headers || []).find(x => String(x.name || '').toLowerCase() === target);
-  return h ? String(h.value || '') : '';
-}}
-
-function messagePlainText(payload) {{
-  if (!payload) return '';
-  if (payload.mimeType === 'text/plain' && payload.body && payload.body.data) {{
-    return b64urlDecode(payload.body.data);
-  }}
-  const parts = payload.parts || [];
-  for (const part of parts) {{
-    const text = messagePlainText(part);
-    if (text) return text;
-  }}
-  if (payload.body && payload.body.data) return b64urlDecode(payload.body.data);
-  return '';
-}}
-
-function sendVoiceReply(to, subject, body, threadId, messageId) {{
-  const profile = gmailApi('profile');
-  const from = String(profile.emailAddress || '');
-  const cleanSubject = /^re:/i.test(subject) ? subject : 'Re: ' + subject;
-  const headers = [
-    'From: ' + from,
-    'To: ' + to,
-    'Subject: ' + cleanSubject,
-    messageId ? 'In-Reply-To: ' + messageId : '',
-    messageId ? 'References: ' + messageId : '',
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=UTF-8',
-    'Content-Transfer-Encoding: 8bit'
-  ].filter(Boolean);
-
-  // Keep the required blank line between RFC 5322 headers and the body.
-  // Do not filter the separator out, or Gmail accepts a message with an empty body.
-  const mime = headers.join('\\r\\n') + '\\r\\n\\r\\n' + String(body || '');
-
-  gmailApi('messages/send', {{
-    method: 'post',
-    contentType: 'application/json',
-    payload: JSON.stringify({{raw: b64urlEncode(mime), threadId: threadId}})
-  }});
-}}
-
-function pollGoogleVoice() {{
-  const props = PropertiesService.getScriptProperties();
-  const allowedDigits = String(ALLOWED_PHONE || '').replace(/\\D/g, '').slice(-10);
-  const formattedPhone = allowedDigits
-    ? '(' + allowedDigits.slice(0,3) + ') ' + allowedDigits.slice(3,6) + '-' + allowedDigits.slice(6)
-    : '';
-  const query = formattedPhone
-    ? 'subject:"New text message from ' + formattedPhone + '" newer_than:1d'
-    : 'subject:"New text message from" newer_than:1d';
-
-  const found = gmailApi('messages?q=' + encodeURIComponent(query) + '&maxResults=30');
-  const refs = found.messages || [];
-  console.log('NetHome: found ' + refs.length + ' recent Google Voice messages');
-
-  const pending = [];
-  refs.forEach(ref => {{
-    const metaKey = 'done_' + String(ref.id || '');
-    if (!ref.id || props.getProperty(metaKey)) return;
-
-    const msg = gmailApi('messages/' + encodeURIComponent(ref.id) + '?format=full');
-    const headers = (msg.payload && msg.payload.headers) || [];
-    const from = headerValue(headers, 'From').toLowerCase();
-    const subject = headerValue(headers, 'Subject');
-
-    if (!from.includes('@txt.voice.google.com')) return;
-    if (!/^new text message from/i.test(subject)) return;
-
-    const subjectDigits = subject.replace(/\\D/g, '');
-    if (allowedDigits && !subjectDigits.endsWith(allowedDigits)) return;
-
-    pending.push({{
-      id: ref.id,
-      metaKey: metaKey,
-      msg: msg,
-      headers: headers,
-      subject: subject,
-      command: extractVoiceCommand(messagePlainText(msg.payload)),
-      ts: Number(msg.internalDate || 0)
-    }});
-  }});
-
-  pending.sort((a, b) => a.ts - b.ts);
-  let sent = 0;
-
-  for (let i = 0; i < pending.length; i++) {{
-    const item = pending[i];
-    if (!item.command) continue;
-
-    const isWeekStart = /^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\\s*:/i.test(item.command);
-    const isWeekFragment = /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{{2}}-\\d{{2}}-\\d{{2}})\\s+/i.test(item.command);
-
-    if (isWeekStart) {{
-      const group = [item];
-
-      // Google Voice can split one long SMS into separate Gmail messages and
-      // those messages are not guaranteed to share the same Gmail thread ID.
-      // Combine nearby schedule-looking pieces from the same allowed phone.
-      for (let j = i + 1; j < pending.length; j++) {{
-        const next = pending[j];
-        if (next.ts - item.ts > 180000) break;
-
-        const nextIsFragment =
-          /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\\d{{2}}-\\d{{2}}-\\d{{2}})\\s+/i.test(next.command || '');
-        if (!nextIsFragment) break;
-        group.push(next);
-      }}
-
-      const newestTs = Math.max.apply(null, group.map(x => x.ts || 0));
-      if (Date.now() - newestTs < 45000) {{
-        console.log('NetHome: waiting for remaining WEEK text pieces');
-        break;
-      }}
-
-      const combined = group.map(x => x.command).filter(Boolean).join(' ; ');
-      console.log('NetHome: combined WEEK command=' + combined.slice(0, 1200));
-
-      try {{
-        const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
-          method: 'post',
-          contentType: 'application/json',
-          payload: JSON.stringify({{text: combined, sender: ALLOWED_PHONE}}),
-          muteHttpExceptions: true
-        }});
-        const code = response.getResponseCode();
-        const raw = response.getContentText() || '{{}}';
-        console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 800));
-        let result = {{}};
-        try {{ result = JSON.parse(raw); }} catch (_) {{}}
-        const replyText = result.reply || result.detail || 'NetHome command received.';
-
-        if (code >= 200 && code < 300) {{
-          const last = group[group.length - 1];
-          const rfcMessageId = headerValue(last.headers, 'Message-ID');
-          sendVoiceReply(headerValue(last.headers, 'From'), last.subject, replyText, last.msg.threadId, rfcMessageId);
-          group.forEach(x => props.setProperty(x.metaKey, new Date().toISOString()));
-          sent++;
-          console.log('NetHome: combined WEEK reply sent pieces=' + group.length);
-          i += group.length - 1;
-        }}
-      }} catch (err) {{
-        console.log('NetHome bridge WEEK error: ' + err);
-      }}
-      continue;
-    }}
-
-    // A split schedule fragment must never be sent as a standalone direct command.
-    // If the WEEK opener has not arrived in this poll yet, leave it unprocessed so
-    // the next poll can combine it with the complete batch.
-    if (isWeekFragment) {{
-      console.log('NetHome: holding orphan WEEK fragment=' + item.command.slice(0, 200));
-      continue;
-    }}
-
-    console.log('NetHome: extracted command=' + item.command);
-    try {{
-      const response = UrlFetchApp.fetch(NETHOME_ENDPOINT, {{
-        method: 'post',
-        contentType: 'application/json',
-        payload: JSON.stringify({{text: item.command, sender: ALLOWED_PHONE}}),
-        muteHttpExceptions: true
-      }});
-      const code = response.getResponseCode();
-      const raw = response.getContentText() || '{{}}';
-      console.log('NetHome: backend HTTP ' + code + ' body=' + raw.slice(0, 500));
-      let result = {{}};
-      try {{ result = JSON.parse(raw); }} catch (_) {{}}
-      const replyText = result.reply || result.detail || 'NetHome command received.';
-
-      if (code >= 200 && code < 300) {{
-        const rfcMessageId = headerValue(item.headers, 'Message-ID');
-        sendVoiceReply(headerValue(item.headers, 'From'), item.subject, replyText, item.msg.threadId, rfcMessageId);
-        props.setProperty(item.metaKey, new Date().toISOString());
-        sent++;
-        console.log('NetHome: reply sent');
-      }}
-    }} catch (err) {{
-      console.log('NetHome bridge error: ' + err);
-    }}
-  }}
-
-  console.log('NetHome: pending=' + pending.length + ' replies=' + sent);
-}}
-function extractVoiceCommand(body) {{
-  const lines = String(body || '').replace(/\\r/g, '').split('\\n')
-    .map(s => s.trim()).filter(Boolean);
-
-  const footerStarts = (line) => {{
-    const s = String(line || '').trim();
-    if (/^to respond to this text message/i.test(s)) return true;
-    if (/^<https?:\\/\\/(?:support\\.google\\.com\\/voice|voice\\.google\\.com\\/settings)/i.test(s)) return true;
-    if (/^https?:\\/\\/(?:support\\.google\\.com\\/voice|voice\\.google\\.com\\/settings)/i.test(s)) return true;
-    if (/^email notifications for text messages/i.test(s)) return true;
-    if (/^if you.*emails in the future/i.test(s)) return true;
-    return false;
-  }};
-
-  const isBoilerplate = (line) => {{
-    if (/^<https?:\\/\\/[^>]+>$/.test(line)) return true;
-    if (/^https?:\\/\\//i.test(line)) return true;
-    if (/^(google voice|your account|help center|help forum|google llc)/i.test(line)) return true;
-    if (/^this email was sent to you/i.test(line)) return true;
-    if (/^1600 amphitheatre/i.test(line)) return true;
-    if (/^mountain view/i.test(line)) return true;
-    if (/^new text message from/i.test(line)) return true;
-    return false;
-  }};
-
-  const useful = [];
-  for (const line of lines) {{
-    if (footerStarts(line)) break;
-    if (isBoilerplate(line)) continue;
-    useful.push(line);
-  }}
-
-  if (!useful.length) return '';
-
-  // Preserve week schedules and split schedule fragments. Google Voice can
-  // deliver one long phone text as several Gmail notifications.
-  if (/^(WEEK|WEEK SCHEDULE|SCHEDULE WEEK)\s*:/i.test(useful[0]) ||
-      /^(TODAY|TOMORROW|MON(?:DAY)?|TUE(?:S|SDAY)?|WED(?:NESDAY)?|THU(?:R|RS|RSDAY)?|FRI(?:DAY)?|SAT(?:URDAY)?|SUN(?:DAY)?|20\d{{2}}-\d{{2}}-\d{{2}})\s+/i.test(useful[0]) ||
-      /^\d{{1,2}}(?::\d{{2}})?\s*(?:AM|PM)\s+/i.test(useful[0])) {{
-    return useful.join(' ; ');
-  }}
-
-  // For normal commands, use only the actual command line. Google Voice emails
-  // can contain extra footer/thread text that must not become part of the command.
-  const commandPattern = /^(STATUS|SMART STATUS|SMART (?:ON|OFF)|SMART \d+(?:\.\d+)?|TARGET \d+(?:\.\d+)?|PRESET (?:SUDAH|ALL DAY|SLEEPING)|SMART MODE (?:AUTO|COOL|HEAT)|DEADBAND \d+(?:\.\d+)?|INTERVAL \d+|SENSOR|NEXT SCHEDULE|ON|OFF|HELP|START|YES|STOP|SCHEDULES?|MODE|WEATHER(?:\s+.*)?|TEMP(?:ERATURE)?\s+\d+(?:\.\d+)?|SET\s+\d+(?:\.\d+)?|COOL\s+\d+(?:\.\d+)?|HEAT\s+\d+(?:\.\d+)?|FAN(?:\s+(?:AUTO|LOW|MEDIUM|HIGH))?|ADD SCHEDULE\s+.*)$/i;
-  for (const line of useful) {{
-    if (commandPattern.test(line)) return line;
-  }}
-
-  return useful[0];
-}}
-
-function installNetHomeTrigger() {{
-  // Force Apps Script to request Gmail authorization before the REST API calls below.
-  // This harmless Gmail read makes the required Gmail scope part of this script automatically,
-  // so you do not need to edit appsscript.json by hand.
-  GmailApp.search('newer_than:1d', 0, 1);
-
-  ScriptApp.getProjectTriggers().forEach(t => ScriptApp.deleteTrigger(t));
-  ScriptApp.newTrigger('pollGoogleVoice').timeBased().everyMinutes(1).create();
-  pollGoogleVoice();
-}}
-"""
-
-
 def _extract_phone_digits_from_gateway(address: str) -> str:
     local = (address or "").split("@", 1)[0]
     return "".join(ch for ch in local if ch.isdigit())
@@ -668,9 +374,6 @@ def health():
         "email_bridge_configured": bool(
             load_email_bridge_config().get("postmark_server_token")
             and load_email_bridge_config().get("inbound_address")
-        ),
-        "google_voice_bridge_configured": bool(
-            load_google_voice_config().get("allowed_phone")
         ),
     }
 
@@ -1094,71 +797,6 @@ def sms_config_update(body: SmsConfigUpdate, request: Request):
         "webhook_url": f"{base}/api/message/twilio?token={config['webhook_secret']}",
         "direct_sms_ready": True,
     }
-
-
-@app.get("/api/google-voice/config", dependencies=[Depends(access_auth)])
-def google_voice_config(request: Request):
-    config = _google_voice_config_with_secret()
-    base = str(request.base_url).rstrip("/")
-    allowed_phone = _normalize_phone(str(config.get("allowed_phone") or ""))
-    return {
-        "ok": True,
-        "allowed_phone": allowed_phone,
-        "ready": bool(allowed_phone),
-        "apps_script": _google_voice_apps_script(
-            base,
-            str(config["bridge_secret"]),
-            allowed_phone,
-        ),
-    }
-
-
-@app.post("/api/google-voice/config", dependencies=[Depends(access_auth)])
-def google_voice_config_update(body: GoogleVoiceConfigUpdate, request: Request):
-    config = _google_voice_config_with_secret()
-    allowed_phone = _normalize_phone(body.allowed_phone)
-    if len(allowed_phone) < 11:
-        raise HTTPException(status_code=400, detail="Enter a valid mobile number.")
-    config["allowed_phone"] = allowed_phone
-    if body.rotate_bridge_secret:
-        config["bridge_secret"] = secrets.token_urlsafe(32)
-    save_google_voice_config(config)
-    base = str(request.base_url).rstrip("/")
-    add_activity("google-voice-config", "updated", "success", "Google Voice bridge configured.")
-    return {
-        "ok": True,
-        "allowed_phone": allowed_phone,
-        "ready": True,
-        "apps_script": _google_voice_apps_script(
-            base,
-            str(config["bridge_secret"]),
-            allowed_phone,
-        ),
-    }
-
-
-@app.post("/api/message/google-voice")
-def google_voice_message(body: EmailTextRequest, request: Request):
-    config = load_google_voice_config()
-    expected = str(config.get("bridge_secret") or "")
-    supplied = request.query_params.get("token") or ""
-    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
-        raise HTTPException(status_code=403, detail="Invalid Google Voice bridge token")
-
-    allowed = _normalize_phone(str(config.get("allowed_phone") or ""))
-    sender = _normalize_phone(body.sender or "")
-    if allowed and sender and not hmac.compare_digest(allowed, sender):
-        add_activity("google-voice", "message", "rejected", f"from={sender[-4:]}")
-        raise HTTPException(status_code=403, detail="Unauthorized phone")
-
-    result = process_text_command(body.text)
-    add_activity(
-        "google-voice",
-        "message",
-        "success" if result.get("ok") else "error",
-        f"command={body.text[:80]}",
-    )
-    return result
 
 
 @app.get("/api/email-bridge/config", dependencies=[Depends(access_auth)])

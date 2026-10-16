@@ -6,6 +6,7 @@
   <title>NetHome Control</title>
   <link rel="stylesheet" href="/static/styles.css" />
   <link rel="stylesheet" href="/static/mode-backgrounds.css" />
+  <link rel="stylesheet" href="/static/lighting.css" />
 </head>
 <body>
   <div class="shell">
@@ -17,6 +18,7 @@
       <nav aria-label="Primary navigation">
         <button class="nav active" data-view="dashboard"><span>⌂</span>Dashboard</button>
         <button class="nav" data-view="schedules"><span>◷</span>Schedules</button>
+        <button class="nav" data-view="lighting"><span aria-hidden="true">☼</span>Lighting</button>
         <button class="nav" data-view="music"><span aria-hidden="true">♫</span>Music</button>
         <button class="nav" data-view="activity"><span>≡</span>Activity</button>
         <button class="nav" data-view="settings"><span>⚙</span>Settings</button>
@@ -229,6 +231,40 @@
         </form>
       </section>
 
+      <section id="lighting" class="view" aria-labelledby="lighting-title">
+        <div class="page-head"><div><p class="eyebrow">ROOM LIGHTING</p><h1 id="lighting-title">Lighting</h1><p class="lede">Plan your lighting now. Connect the hardware when you’re ready.</p></div><button id="lighting-refresh" class="secondary" type="button">Refresh</button></div>
+        <div class="lighting-notice"><strong>Ready to set up · Hardware not connected</strong><p>Save colors, brightness and timing here. These controls preview your settings; they do not switch the lights yet.</p></div>
+        <p id="lighting-state" role="status" aria-live="polite">Open Lighting to load your settings.</p>
+        <div id="lighting-zones" class="lighting-zones" aria-label="Lighting zones"></div>
+        <div class="lighting-section-head"><div><h2>Lighting schedules</h2><p class="lede">Saved timing will start controlling the lights after connection and activation.</p></div><button id="lighting-add" type="button" disabled>+ New lighting schedule</button></div>
+        <form id="lighting-form" class="card lighting-form" hidden>
+          <h2 id="lighting-form-title">New lighting schedule</h2>
+          <div class="form-grid">
+            <label>Schedule name<input name="name" required maxlength="80" placeholder="Evening lights"></label>
+            <label>Lighting group<select name="zone_id" id="lighting-schedule-zone" required></select></label>
+            <label>Action<select name="power"><option value="true">Turn on</option><option value="false">Turn off</option></select></label>
+            <label>Repeat<select name="repeat" id="lighting-repeat"><option value="daily">Every day</option><option value="weekly">Selected weekdays</option><option value="one_time">One specific date</option></select></label>
+            <label>Time<input name="time_local" type="time" required value="18:00"></label>
+            <label>Timezone<input name="timezone" required value="America/New_York" maxlength="80" placeholder="America/New_York"></label>
+            <label id="lighting-date-wrap" hidden>Date<input name="date_local" type="date" disabled></label>
+          </div>
+          <fieldset id="lighting-days" class="lighting-weekdays" hidden><legend>Days of the week</legend>
+            <label><input type="checkbox" name="days" value="0">Mon</label><label><input type="checkbox" name="days" value="1">Tue</label><label><input type="checkbox" name="days" value="2">Wed</label><label><input type="checkbox" name="days" value="3">Thu</label><label><input type="checkbox" name="days" value="4">Fri</label><label><input type="checkbox" name="days" value="5">Sat</label><label><input type="checkbox" name="days" value="6">Sun</label>
+          </fieldset>
+          <fieldset id="lighting-schedule-rgb" class="lighting-rgb-settings"><legend>RGB settings when turning on</legend>
+            <label>Color mode<select name="color_mode"><option value="color">Color</option><option value="white">White</option></select></label>
+            <label>Color<input name="color" type="color" value="#45a5ff"></label>
+            <label>Brightness <input name="brightness" type="range" min="0" max="100" value="80"><output id="lighting-schedule-brightness">80%</output></label>
+          </fieldset>
+          <label class="lighting-enabled"><input name="enabled" type="checkbox" checked>Keep this schedule enabled for activation after connection</label>
+          <p id="lighting-form-error" class="form-error" role="alert" hidden></p>
+          <div id="lighting-preview" class="lighting-preview" aria-live="polite" hidden></div>
+          <div class="form-actions"><button id="lighting-cancel" class="secondary" type="button">Cancel</button><button id="lighting-preview-button" class="secondary" type="button">Preview timing</button><button type="submit">Save schedule</button></div>
+        </form>
+        <div id="lighting-schedules" class="lighting-schedules"></div>
+        <p class="lighting-footnote">Walls + Roof stay together for now. Regular lights use on/off only; separate roof control and dimming can be added later.</p>
+      </section>
+
       <section id="music" class="view" aria-labelledby="music-title">
         <div class="page-head"><div><p class="eyebrow">YOUR LIBRARY</p><h1 id="music-title">Music</h1><p class="lede">Upload MP3 files and choose what to play.</p></div><button id="music-refresh" class="secondary" type="button">Refresh</button></div>
         <div class="card music-player">
@@ -330,27 +366,6 @@
           <article class="card setting-card"><div class="setting-icon">☁</div><div><h2>NetHome Plus</h2><p>AC commands run directly through the hosted NetHome cloud connection. No computer worker is required.</p><span class="setting-state ok-text">Cloud connected</span></div></article>
           <article class="card setting-card"><div class="setting-icon">✓</div><div><h2>Current host</h2><p>GitHub → Vercel → Supabase → NetHome/Midea Cloud.</p><span class="setting-state ok-text">Hosted</span></div></article>
           <article class="card setting-card" style="grid-column:1/-1">
-            <div class="setting-icon">GV</div>
-            <div style="width:100%">
-              <h2>Google Voice Temporary Bridge</h2>
-              <p>Use this while Twilio approval is pending. Google Voice forwards incoming texts to Gmail; a one-minute Apps Script reads the command, calls this app, and replies to the same Google Voice email thread so the answer returns as a text.</p>
-              <div class="form-grid" style="margin-top:14px">
-                <label class="field">Allowed mobile number
-                  <input id="gv-allowed-phone" type="tel" placeholder="(555) 123-4567" autocomplete="tel">
-                </label>
-                <label class="field" style="grid-column:1/-1">Apps Script code
-                  <textarea id="gv-apps-script" rows="15" readonly style="width:100%;font-family:ui-monospace,SFMono-Regular,Consolas,monospace"></textarea>
-                </label>
-              </div>
-              <div class="form-actions" style="justify-content:flex-start">
-                <button type="button" id="save-gv-config">Save Google Voice Setup</button>
-                <button type="button" id="copy-gv-script" class="secondary">Copy Apps Script</button>
-                <span id="gv-config-state" class="setting-state">Not configured</span>
-              </div>
-              <p class="helper">In the Gmail account that receives Google Voice notifications, replace the old Apps Script with this code, save it, then run <strong>installNetHomeTrigger</strong> once. After that, text the Google Voice number normally.</p>
-            </div>
-          </article>
-          <article class="card setting-card" style="grid-column:1/-1">
             <div class="setting-icon">SMS</div>
             <div style="width:100%">
               <h2>Direct SMS through Twilio</h2>
@@ -379,6 +394,7 @@
   </div>
   <script src="/static/app.js"></script>
   <script src="/static/music.js"></script>
+  <script src="/static/lighting.js"></script>
 </body>
 </html>
 
