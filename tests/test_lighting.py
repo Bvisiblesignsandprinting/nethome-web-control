@@ -23,7 +23,7 @@ def client(tmp_path, monkeypatch):
 
 
 def schedule(**changes):
-    return {"name": "Evening", "zone_id": "rgb-walls", "command": {"power": True, "color": "#ff8800", "brightness": 60},
+    return {"name": "Evening", "zone_ids": ["rgb-walls"], "command": {"power": True, "color": "#ff8800", "brightness": 60},
             "repeat": "weekly", "days": [0, 4], "time_local": "18:00", "timezone": "America/New_York", "enabled": True, **changes}
 
 
@@ -167,10 +167,32 @@ def test_schedule_create_edit_disable_delete_and_preview(client):
     assert client.get('/api/lighting').json()['schedules'] == []
 
 
+def test_one_schedule_can_select_walls_roof_and_chandeliers(client):
+    shared = schedule(zone_ids=['regular-walls-roof','chandeliers'], command={'power':True}, repeat='daily', days=[])
+    r = client.post('/api/lighting/schedules', json={'revision':0,'schedule':shared})
+    assert r.status_code == 200, r.text
+    saved = r.json()['schedules'][0]
+    assert saved['zone_ids'] == ['regular-walls-roof','chandeliers']
+    assert saved['command'] == {'power':True}
+
+
+def test_legacy_single_zone_schedule_is_read_as_checkbox_selection(client):
+    legacy = schedule()
+    legacy['zone_id'] = legacy.pop('zone_ids')[0]
+    with db._sqlite_conn() as conn:
+        import json
+        value = lighting_store.defaults()
+        value['schedules'] = [legacy | {'id':'legacy'}]
+        conn.execute("insert into activity(created_at,source,action,result,details) values (?, 'lighting-config','settings','active',?)", (db._now(),json.dumps(value)))
+    saved = client.get('/api/lighting').json()['schedules'][0]
+    assert saved['zone_ids'] == ['rgb-walls'] and 'zone_id' not in saved
+
+
 @pytest.mark.parametrize('changes', [{'time_local':'25:00'}, {'time_local':'8:00'}, {'days':[]},
     {'days':[0,0]}, {'days':[7]}, {'days':['1']}, {'timezone':'not/a/zone'}, {'name':'   '},
     {'repeat':'monthly'}, {'repeat':'one_time','days':[]}, {'command':{'color':'white'}},
-    {'zone_id':'chandeliers'}, {'enabled':'true'}, {'repeat':'daily', 'days':[1]}])
+    {'zone_ids':['chandeliers']}, {'zone_ids':[]}, {'zone_ids':['rgb-walls','rgb-walls']},
+    {'zone_ids':['missing']}, {'enabled':'true'}, {'repeat':'daily', 'days':[1]}])
 def test_invalid_schedules_are_rejected(client, changes):
     r = client.post('/api/lighting/schedules', json={'revision': 0, 'schedule': schedule(**changes)})
     assert r.status_code in (404, 422), r.text
@@ -178,7 +200,7 @@ def test_invalid_schedules_are_rejected(client, changes):
 
 
 def test_regular_off_schedule_and_one_time_validation(client):
-    s = schedule(zone_id='regular-walls-roof', command={'power': False}, repeat='daily', days=[])
+    s = schedule(zone_ids=['regular-walls-roof'], command={'power': False}, repeat='daily', days=[])
     assert client.post('/api/lighting/schedules', json={'revision':0,'schedule':s}).status_code == 200
     past = schedule(repeat='one_time', days=[], date_local='2020-01-01')
     assert client.post('/api/lighting/schedules', json={'revision':1,'schedule':past}).status_code == 422

@@ -108,9 +108,7 @@
         await mutate('/zones/' + card.dataset.zone, 'PATCH', {command});
       });
     }
-    if (!field('zone_id').options.length) {
-      for (const zone of data.zones) field('zone_id').add(new Option((zone.kind === 'rgbw' ? 'RGB · ' : 'Regular · ') + zone.name, zone.id));
-    }
+    $('lighting-schedule-zones').innerHTML = data.zones.map(zone => `<label><input type="checkbox" name="zone_ids" value="${zone.id}">${escape((zone.kind === 'rgbw' ? 'RGB · ' : 'Regular · ') + zone.name)}</label>`).join('');
     $('lighting-schedules').replaceChildren();
     if (!data.schedules.length) {
       const empty = document.createElement('p'); empty.className = 'empty';
@@ -118,12 +116,12 @@
       $('lighting-schedules').append(empty);
     }
     for (const schedule of data.schedules) {
-      const zone = data.zones.find(z => z.id === schedule.zone_id);
+      const zones = schedule.zone_ids.map(id => data.zones.find(z => z.id === id)).filter(Boolean);
       const row = document.createElement('article'); row.className = 'card lighting-schedule';
       const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
       const repeat = schedule.repeat === 'weekly' ? schedule.days.map(d => days[d]).join(', ') : schedule.repeat === 'one_time' ? schedule.date_local : 'Every day';
       const command = schedule.command;
-      const details = [zone.name, command.power === false ? 'Off' : command.power === true ? 'On' : 'Change settings', command.color === 'white' ? 'White' : command.color, command.brightness != null ? command.brightness + '%' : null].filter(Boolean).join(' · ');
+      const details = [zones.map(z => z.name).join(' + '), command.power === false ? 'Off' : command.power === true ? 'On' : 'Change settings', command.color === 'white' ? 'White' : command.color, command.brightness != null ? command.brightness + '%' : null].filter(Boolean).join(' · ');
       const next = schedule.next_occurrences[0];
       row.innerHTML = `<div><h3>${escape(schedule.name)}</h3><p>${escape(details)}</p><p>${escape(repeat)} · ${escape(schedule.time_local)} · ${escape(schedule.timezone)}</p><p class="lighting-actual">${schedule.enabled ? next ? 'Planned next: ' + escape(formatOccurrence(next, schedule.timezone)) : 'No future occurrence' : 'Disabled'}</p><span class="lighting-badge">${schedule.enabled ? 'Waiting for connection' : 'Disabled'}</span></div><div class="lighting-schedule-actions"><button type="button" class="secondary" data-action="edit">Edit</button><button type="button" class="secondary" data-action="toggle">${schedule.enabled ? 'Disable' : 'Enable'}</button><button type="button" class="secondary" data-action="delete">Delete</button></div>`;
       row.querySelector('[data-action="edit"]').addEventListener('click', () => openForm(schedule));
@@ -137,7 +135,7 @@
   }
 
   function writable(schedule) {
-    return Object.fromEntries(['name','zone_id','command','repeat','time_local','timezone','days','date_local','enabled'].filter(k => schedule[k] != null).map(k => [k, schedule[k]]));
+    return Object.fromEntries(['name','zone_ids','command','repeat','time_local','timezone','days','date_local','enabled'].filter(k => schedule[k] != null).map(k => [k, schedule[k]]));
   }
 
   async function load() {
@@ -174,7 +172,8 @@
     $('lighting-date-wrap').hidden = repeat !== 'one_time';
     field('date_local').disabled = repeat !== 'one_time'; field('date_local').required = repeat === 'one_time';
     $('lighting-days').hidden = repeat !== 'weekly';
-    const rgb = data?.zones.find(z => z.id === field('zone_id').value)?.kind === 'rgbw' && field('power').value === 'true';
+    const selectedZones = [...form.querySelectorAll('[name="zone_ids"]:checked')].map(x => x.value);
+    const rgb = selectedZones.some(id => data?.zones.find(z => z.id === id)?.kind === 'rgbw') && field('power').value === 'true';
     $('lighting-schedule-rgb').hidden = !rgb; $('lighting-schedule-rgb').disabled = !rgb;
     field('color').disabled = !rgb || field('color_mode').value === 'white';
     $('lighting-schedule-brightness').textContent = field('brightness').value + '%';
@@ -186,7 +185,8 @@
     form.reset(); editingId = schedule?.id ?? null;
     $('lighting-form-title').textContent = schedule ? 'Edit lighting schedule' : 'New lighting schedule';
     if (schedule) {
-      for (const key of ['name','zone_id','repeat','time_local','timezone','date_local']) field(key).value = schedule[key] ?? '';
+      for (const key of ['name','repeat','time_local','timezone','date_local']) field(key).value = schedule[key] ?? '';
+      for (const box of form.querySelectorAll('[name="zone_ids"]')) box.checked = schedule.zone_ids.includes(box.value);
       field('power').value = String(schedule.command.power ?? true);
       field('enabled').checked = schedule.enabled;
       field('color_mode').value = schedule.command.color === 'white' ? 'white' : 'color';
@@ -202,10 +202,12 @@
     if (!form.reportValidity()) return null;
     const repeat = field('repeat').value;
     const days = repeat === 'weekly' ? [...form.querySelectorAll('[name="days"]:checked')].map(x => Number(x.value)) : [];
+    const zone_ids = [...form.querySelectorAll('[name="zone_ids"]:checked')].map(x => x.value);
+    if (!zone_ids.length) throw new Error('Choose at least one lighting group.');
     if (repeat === 'weekly' && !days.length) throw new Error('Choose at least one weekday.');
     const command = {power: field('power').value === 'true'};
     if (!$('lighting-schedule-rgb').disabled) Object.assign(command, {color: field('color_mode').value === 'white' ? 'white' : field('color').value, brightness: Number(field('brightness').value)});
-    return {name: field('name').value.trim(), zone_id: field('zone_id').value, command, repeat,
+    return {name: field('name').value.trim(), zone_ids, command, repeat,
       time_local: field('time_local').value, timezone: field('timezone').value.trim(), days,
       ...(repeat === 'one_time' ? {date_local: field('date_local').value} : {}), enabled: field('enabled').checked};
   }

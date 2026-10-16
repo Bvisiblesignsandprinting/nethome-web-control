@@ -91,7 +91,7 @@ class LinkWrite(BaseModel):
 class LightingSchedule(BaseModel):
     model_config = ConfigDict(extra="forbid")
     name: str = Field(min_length=1, max_length=80)
-    zone_id: str
+    zone_ids: list[str] = Field(min_length=1, max_length=4)
     command: Command
     repeat: Literal["daily", "weekly", "one_time"] = "daily"
     time_local: str
@@ -126,6 +126,8 @@ class LightingSchedule(BaseModel):
 
     @model_validator(mode="after")
     def valid_recurrence(self):
+        if len(set(self.zone_ids)) != len(self.zone_ids):
+            raise ValueError("Choose each lighting group once")
         if self.command.power is None:
             raise ValueError("Choose on or off for a lighting schedule")
         if any(day < 0 or day > 6 for day in self.days) or len(set(self.days)) != len(self.days):
@@ -184,7 +186,12 @@ def snapshot(value):
 
 
 def validate_schedule(schedule):
-    validate_zone_command(schedule.zone_id, schedule.command)
+    for zone_id in schedule.zone_ids:
+        if zone_id not in ZONES:
+            raise HTTPException(404, "Lighting zone not found")
+    if all(ZONES[zone_id]["kind"] == "switch" for zone_id in schedule.zone_ids):
+        if schedule.command.brightness is not None or schedule.command.color is not None or schedule.command.effect is not None:
+            raise HTTPException(422, "Regular lights currently support on/off only")
     if schedule.enabled and schedule.repeat == "one_time" and not occurrences(schedule.model_dump(mode="json")):
         raise HTTPException(422, "Choose a future date and time for an enabled one-time schedule")
 
@@ -220,7 +227,7 @@ def lighting_router(auth):
 
     @router.post("/schedules/preview")
     def preview(body: LightingSchedule):
-        validate_zone_command(body.zone_id, body.command)
+        validate_schedule(body)
         return {"occurrences": occurrences(body.model_dump(mode="json")), "delivery": "preview_only", "hardware_ready": False}
 
     @router.post("/schedules")
