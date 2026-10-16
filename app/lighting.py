@@ -15,11 +15,43 @@ from .lighting_store import ZONE_DEFINITIONS, document
 ZONES = {z["id"]: z for z in ZONE_DEFINITIONS}
 
 
+class LightEffect(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    mode: Literal["solid", "fade", "pulse", "blink"] = "solid"
+    colors: list[str] = Field(default_factory=list, max_length=8)
+    cycle_seconds: StrictInt = Field(default=12, ge=1, le=120)
+    transition: StrictInt = Field(default=100, ge=0, le=100)
+    red_balance: StrictInt = Field(default=140, ge=50, le=200)
+    green_balance: StrictInt = Field(default=100, ge=50, le=200)
+    blue_balance: StrictInt = Field(default=100, ge=50, le=200)
+
+    @field_validator("colors")
+    @classmethod
+    def valid_colors(cls, values):
+        result = []
+        for value in values:
+            if not re.fullmatch(r"#[0-9a-fA-F]{6}", value):
+                raise ValueError("Each effect color must be a six-digit hex color")
+            result.append(value.upper())
+        return result
+
+    @model_validator(mode="after")
+    def valid_sequence(self):
+        if self.mode == "solid" and self.colors:
+            raise ValueError("Solid color does not use an effect color sequence")
+        if self.mode != "solid" and len(self.colors) < 2:
+            raise ValueError("Choose at least two colors for an effect")
+        if self.mode == "blink" and self.transition != 0:
+            raise ValueError("Blink effects use a 0% transition")
+        return self
+
+
 class Command(BaseModel):
     model_config = ConfigDict(extra="forbid")
     power: StrictBool | None = None
     brightness: StrictInt | None = Field(default=None, ge=0, le=100)
     color: str | None = None
+    effect: LightEffect | None = None
 
     @field_validator("color")
     @classmethod
@@ -32,7 +64,7 @@ class Command(BaseModel):
 
     @model_validator(mode="after")
     def nonempty(self):
-        if all(getattr(self, key) is None for key in ("power", "brightness", "color")):
+        if all(getattr(self, key) is None for key in ("power", "brightness", "color", "effect")):
             raise ValueError("Choose at least one lighting setting")
         return self
 
@@ -40,7 +72,7 @@ class Command(BaseModel):
 def validate_zone_command(zone_id, command):
     if zone_id not in ZONES:
         raise HTTPException(404, "Lighting zone not found")
-    if ZONES[zone_id]["kind"] == "switch" and (command.brightness is not None or command.color is not None):
+    if ZONES[zone_id]["kind"] == "switch" and (command.brightness is not None or command.color is not None or command.effect is not None):
         raise HTTPException(422, "Regular lights currently support on/off only")
 
 
