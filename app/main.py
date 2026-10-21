@@ -59,6 +59,7 @@ from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
 from .music import music_router
 from .lighting import lighting_router
+from .panel_wifi import wifi_router
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -112,6 +113,7 @@ def access_auth(
 
 app.include_router(music_router(access_auth))
 app.include_router(lighting_router(access_auth))
+app.include_router(wifi_router(access_auth))
 
 
 class LoginRequest(BaseModel):
