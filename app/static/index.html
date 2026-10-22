@@ -275,6 +275,15 @@
             <div class="music-actions"><button id="music-previous" type="button" class="secondary transport" disabled aria-label="Previous song"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14M18 6l-9 6 9 6z"/></svg></button><button id="music-next" type="button" class="secondary transport" disabled aria-label="Next song"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14M6 6l9 6-9 6z"/></svg></button></div>
           </div>
         </div>
+        <nav class="music-source-tabs" aria-label="Music source">
+          <button id="music-source-library" type="button" aria-pressed="true">My music</button>
+          <button id="music-source-radio" type="button" aria-pressed="false">Yiddish24 radio</button>
+        </nav>
+        <section id="music-radio-pane" hidden aria-label="Yiddish24 live stations">
+          <div class="music-library-head"><div><p class="music-kicker">LIVE RADIO</p><h2>Yiddish24</h2><p>Live music directly from Yiddish24.</p></div><label class="music-search"><span class="visually-hidden">Search stations</span><input id="music-radio-search" type="search" placeholder="Search stations or singers"></label></div>
+          <div id="music-radio-stations" class="music-library" aria-live="polite"></div>
+          <div class="music-radio-footer"><a href="https://www.yiddish24.com/streams" target="_blank" rel="noopener noreferrer">Open Yiddish24</a><button id="music-radio-stop" class="secondary" type="button">Stop radio</button></div>
+        </section>
         <form id="music-upload" class="card music-upload">
           <div><p class="music-kicker">ADD TO LIBRARY</p><h2>Upload music</h2><p>MP3 files only · up to 25 MB per song. Folder upload keeps artist and album folders.</p></div>
           <input id="music-files" class="visually-hidden" type="file" accept=".mp3,audio/mpeg" multiple disabled>
@@ -284,7 +293,7 @@
           <progress id="music-progress" max="100" value="0" hidden aria-label="Upload progress"></progress>
         </form>
         <p id="music-state" role="status" aria-live="polite">Open Music to load your library.</p>
-        <div class="music-library-head"><div><p class="music-kicker">LIBRARY</p><h2>Your music</h2></div><label class="music-search"><span class="visually-hidden">Search music</span><input id="music-search" type="search" placeholder="Search songs or folders"></label></div>
+        <div id="music-files-heading" class="music-library-head"><div><p class="music-kicker">LIBRARY</p><h2>Your music</h2></div><label class="music-search"><span class="visually-hidden">Search music</span><input id="music-search" type="search" placeholder="Search songs or folders"></label></div>
         <div id="music-library" class="music-library" aria-label="Music library"></div>
         <button id="music-load-more" type="button" class="secondary" hidden>Load more songs</button>
       </section>

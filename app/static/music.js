@@ -4,6 +4,9 @@
   const audio = $('music-audio');
   let tracks = [], nextOffset = null, currentId = null, playbackGeneration = 0;
   let loading = false, uploading = false;
+  let radioStations = [], currentRadio = null, radioLoading = false, radioVisible = false;
+  let radioRetryTimer = null, radioRetries = 0;
+  const cancelRadioRetry = () => { clearTimeout(radioRetryTimer); radioRetryTimer = null; };
   const state = message => { $('music-state').textContent = message; };
   const trackPath = id => id.split('/').map(encodeURIComponent).join('/');
   const icon = (name) => {
@@ -25,9 +28,10 @@
   }
 
   function navigation() {
-    const index = tracks.findIndex(track => track.id === currentId);
+    const queue = currentRadio ? radioStations : tracks;
+    const index = queue.findIndex(track => track.id === (currentRadio || currentId));
     $('music-previous').disabled = index <= 0;
-    $('music-next').disabled = index < 0 || index >= tracks.length - 1;
+    $('music-next').disabled = index < 0 || index >= queue.length - 1;
   }
 
   function render() {
@@ -58,7 +62,7 @@
       remove.addEventListener('click', () => deleteTrack(track, remove));
       row.append(art, copy, play, remove); library.append(row);
     }
-    $('music-load-more').hidden = nextOffset === null;
+    $('music-load-more').hidden = radioVisible || nextOffset === null;
     navigation();
   }
 
@@ -83,6 +87,7 @@
   }
 
   async function playTrack(track) {
+    cancelRadioRetry(); currentRadio = null; radioRetries = 0; renderRadio();
     const generation = ++playbackGeneration;
     audio.pause();
     state('Loading ' + track.title + '…');
@@ -100,6 +105,90 @@
       if (generation === playbackGeneration) state(error.name === 'NotAllowedError' ? 'Press Play on the audio player to start.' : error.message);
     }
   }
+
+  function renderRadio() {
+    const list = $('music-radio-stations'); list.replaceChildren();
+    const query = $('music-radio-search').value.trim().toLowerCase();
+    const visible = radioStations.filter(row => (row.name + ' ' + row.title).toLowerCase().includes(query));
+    if (!visible.length) {
+      const empty = document.createElement('p'); empty.className = 'music-empty';
+      empty.textContent = radioLoading ? 'Loading stations…' : radioStations.length ? 'No stations match your search.' : 'Stations could not be loaded. Select Yiddish24 radio to retry.';
+      list.append(empty);
+    }
+    for (const row of visible) {
+      const item = document.createElement('article'); item.className = 'music-track music-radio-row';
+      if (row.id === currentRadio) item.classList.add('is-playing');
+      const art = document.createElement('div'); art.className = 'music-track-art'; art.textContent = 'Y24';
+      const copy = document.createElement('div'); copy.className = 'music-track-copy';
+      const name = document.createElement('strong'); name.textContent = row.name;
+      const title = document.createElement('span'); title.textContent = row.title; title.className = 'music-radio-title';
+      const live = document.createElement('span'); live.textContent = 'LIVE'; live.className = 'music-radio-live'; copy.append(name,title,live);
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'music-row-button'; button.innerHTML = icon('play') + '<span>Listen</span>';
+      button.setAttribute('aria-label','Listen to ' + row.name); button.addEventListener('click',() => playRadio(row));
+      item.append(art,copy,button); list.append(item);
+    }
+  }
+
+  async function loadRadio() {
+    if (radioLoading) return;
+    radioLoading = true; renderRadio();
+    try { const result = await api('/radio/stations'); radioStations = result.stations; }
+    catch (error) { state(error.message); }
+    finally { radioLoading = false; renderRadio(); navigation(); }
+  }
+
+  function sourceRadio(enabled) {
+    radioVisible = enabled;
+    $('music-radio-pane').hidden = !enabled;
+    for (const id of ['music-upload','music-files-heading','music-library','music-load-more']) $(id).hidden = enabled || (id === 'music-load-more' && nextOffset === null);
+    $('music-source-radio').setAttribute('aria-pressed',String(enabled));
+    $('music-source-library').setAttribute('aria-pressed',String(!enabled));
+    if (enabled) loadRadio(); else load();
+  }
+
+  async function playRadio(station, retry = false) {
+    cancelRadioRetry(); if (!retry) radioRetries = 0;
+    const generation = ++playbackGeneration;
+    currentRadio = station.id; currentId = null; audio.pause();
+    state('Connecting to ' + station.name + '…');
+    try {
+      const result = await api('/radio/stations/' + encodeURIComponent(station.id) + '/playback',{method:'POST'});
+      if (generation !== playbackGeneration) return;
+      audio.src = result.url;
+      $('music-now-playing').textContent = station.name;
+      $('music-now-folder').textContent = 'Yiddish24 · Live radio';
+      render(); renderRadio(); navigation();
+      await audio.play();
+      if (generation === playbackGeneration) state('Playing ' + station.name + ' · Yiddish24 live.');
+    } catch (error) {
+      if (generation === playbackGeneration) state(error.name === 'NotAllowedError' ? 'Press Play on the audio player to listen.' : error.message);
+    }
+  }
+
+  function stopRadio() {
+    if (!currentRadio) return;
+    cancelRadioRetry(); ++playbackGeneration; currentRadio = null; radioRetries = 0;
+    audio.pause(); audio.removeAttribute('src'); audio.load();
+    $('music-now-playing').textContent = 'Choose music'; $('music-now-folder').textContent = 'Songs and live radio';
+    render(); renderRadio(); navigation(); state('Radio stopped.');
+  }
+
+  function reconnectRadio() {
+    const station = radioStations.find(row => row.id === currentRadio);
+    if (!station || radioRetryTimer) return;
+    if (radioRetries >= 3) { state('Radio interrupted. Select the station again to reconnect.'); return; }
+    const generation = playbackGeneration, id = currentRadio;
+    const delay = [3000,10000,30000][radioRetries++]; state('Radio interrupted. Reconnecting…');
+    radioRetryTimer = setTimeout(() => {
+      radioRetryTimer = null;
+      if (generation === playbackGeneration && id === currentRadio) playRadio(station,true);
+    },delay);
+  }
+
+  $('music-source-radio').addEventListener('click',() => sourceRadio(true));
+  $('music-source-library').addEventListener('click',() => sourceRadio(false));
+  $('music-radio-search').addEventListener('input',renderRadio);
+  $('music-radio-stop').addEventListener('click',stopRadio);
 
   async function deleteTrack(track, button) {
     if (!confirm('Delete “' + track.title + '” from your music library?')) return;
@@ -170,14 +259,19 @@
   });
 
   $('music-previous').addEventListener('click', () => {
-    const index = tracks.findIndex(track => track.id === currentId); if (index > 0) playTrack(tracks[index - 1]);
+    const queue = currentRadio ? radioStations : tracks;
+    const index = queue.findIndex(track => track.id === (currentRadio || currentId));
+    if (index > 0) currentRadio ? playRadio(queue[index-1]) : playTrack(queue[index-1]);
   });
   const next = () => {
-    const index = tracks.findIndex(track => track.id === currentId); if (index >= 0 && index + 1 < tracks.length) playTrack(tracks[index + 1]);
+    const queue = currentRadio ? radioStations : tracks;
+    const index = queue.findIndex(track => track.id === (currentRadio || currentId));
+    if (index >= 0 && index + 1 < queue.length) currentRadio ? playRadio(queue[index+1]) : playTrack(queue[index+1]);
   };
-  $('music-next').addEventListener('click', next); audio.addEventListener('ended', next);
-  audio.addEventListener('error', () => state('Unable to play this file. Check that it is a valid MP3, or select Play again to refresh its link.'));
-  $('music-refresh').addEventListener('click', () => load());
+  $('music-next').addEventListener('click', next);
+  audio.addEventListener('ended', () => currentRadio ? reconnectRadio() : next());
+  audio.addEventListener('error', () => currentRadio ? reconnectRadio() : state('Unable to play this file. Check that it is a valid MP3, or select Play again to refresh its link.'));
+  $('music-refresh').addEventListener('click', () => radioVisible ? loadRadio() : load());
   $('music-files').addEventListener('change', () => { $('music-folder').value = ''; updateSelection(); });
   $('music-folder').addEventListener('change', () => { $('music-files').value = ''; updateSelection(); });
   $('music-search').addEventListener('input', render);

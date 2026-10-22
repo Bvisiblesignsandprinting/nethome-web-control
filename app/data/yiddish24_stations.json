@@ -1,0 +1,362 @@
+[
+  {
+    "id": "y24-1",
+    "title": "אלגעמיינע קאלעקשאן",
+    "url": "https://music.y24.app/1",
+    "name": "General collection"
+  },
+  {
+    "id": "y24-7",
+    "title": "אידישע ניגונים קאלעקשאן",
+    "url": "https://music.y24.app/7",
+    "name": "Yiddishe niggunim"
+  },
+  {
+    "id": "y24-9",
+    "title": "קומזיץ קאלעקשאן",
+    "url": "https://music.y24.app/9",
+    "name": "Kumzitz"
+  },
+  {
+    "id": "y24b-37",
+    "title": "לעבעדיג קאלעקשאן",
+    "url": "https://music2.y24.app/37",
+    "name": "Lebedig collection"
+  },
+  {
+    "id": "y24-8",
+    "title": "חתונה פרייליך קאלעקשאן",
+    "url": "https://music.y24.app/8",
+    "name": "Wedding freilach"
+  },
+  {
+    "id": "y24-10",
+    "title": "חתונה צווייטע טאנץ קאלעקשאן",
+    "url": "https://music.y24.app/10",
+    "name": "Second dance"
+  },
+  {
+    "id": "y24b-55",
+    "title": "טאנץ קאלעקשאן",
+    "url": "https://music2.y24.app/55",
+    "name": "Dance collection"
+  },
+  {
+    "id": "y24b-54",
+    "title": "מארש קאלעקשאן",
+    "url": "https://music2.y24.app/54",
+    "name": "March collection"
+  },
+  {
+    "id": "y24-11",
+    "title": "רואיגע/שטייטע מוזיק",
+    "url": "https://music.y24.app/11",
+    "name": "Calm music"
+  },
+  {
+    "id": "y24-2",
+    "title": "שבת קאלעקשאן",
+    "url": "https://music.y24.app/2",
+    "name": "Shabbos"
+  },
+  {
+    "id": "y24-6",
+    "title": "מוצאי שבת קאלעקשאן",
+    "url": "https://music.y24.app/6",
+    "name": "Motzei Shabbos"
+  },
+  {
+    "id": "y24-3",
+    "title": "נגינה אן מוזיק",
+    "url": "https://music.y24.app/3",
+    "name": "Niggunim without music"
+  },
+  {
+    "id": "y24b-38",
+    "title": "פיאנע",
+    "url": "https://music2.y24.app/38",
+    "name": "Piano"
+  },
+  {
+    "id": "y24b-39",
+    "title": "מעדיטעשאן",
+    "url": "https://music2.y24.app/39",
+    "name": "Meditation"
+  },
+  {
+    "id": "y24-5",
+    "title": "חזנות קאלעקשאן",
+    "url": "https://music.y24.app/5",
+    "name": "Chazzanus"
+  },
+  {
+    "id": "y24-16",
+    "title": "ימים נוראים",
+    "url": "https://music.y24.app/16",
+    "name": "Yamim Noraim"
+  },
+  {
+    "id": "y24-17",
+    "title": "סוכות",
+    "url": "https://music.y24.app/17",
+    "name": "Sukkos"
+  },
+  {
+    "id": "y24-4",
+    "title": "חנוכה קאלעקשאן",
+    "url": "https://music.y24.app/4",
+    "name": "Chanukah"
+  },
+  {
+    "id": "y24-12",
+    "title": "פורים קאלעקשאן",
+    "url": "https://music.y24.app/12",
+    "name": "Purim"
+  },
+  {
+    "id": "y24-13",
+    "title": "פסח קאלעקשאן",
+    "url": "https://music.y24.app/13",
+    "name": "Pesach"
+  },
+  {
+    "id": "y24-14",
+    "title": "ל״ג בעומר",
+    "url": "https://music.y24.app/14",
+    "name": "Lag BaOmer"
+  },
+  {
+    "id": "y24-19",
+    "title": "שבועות",
+    "url": "https://music.y24.app/19",
+    "name": "Shavuos"
+  },
+  {
+    "id": "y24b-31",
+    "title": "באבוב",
+    "url": "https://music2.y24.app/31",
+    "name": "Bobov"
+  },
+  {
+    "id": "y24b-28",
+    "title": "בעלזא",
+    "url": "https://music2.y24.app/28",
+    "name": "Belz"
+  },
+  {
+    "id": "y24b-29",
+    "title": "וויזניץ",
+    "url": "https://music2.y24.app/29",
+    "name": "Vizhnitz"
+  },
+  {
+    "id": "y24b-40",
+    "title": "חב''ד",
+    "url": "https://music2.y24.app/40",
+    "name": "Chabad"
+  },
+  {
+    "id": "y24b-33",
+    "title": "מוד׳זיץ",
+    "url": "https://music2.y24.app/33",
+    "name": "Modzitz"
+  },
+  {
+    "id": "y24b-35",
+    "title": "סאטמאר",
+    "url": "https://music2.y24.app/35",
+    "name": "Satmar"
+  },
+  {
+    "id": "y24b-30",
+    "title": "סקולען",
+    "url": "https://music2.y24.app/30",
+    "name": "Skulen"
+  },
+  {
+    "id": "y24b-27",
+    "title": "לחיים",
+    "url": "https://music2.y24.app/27",
+    "name": "Lchaim"
+  },
+  {
+    "id": "y24-26",
+    "title": "קינדער קווייער",
+    "url": "https://music.y24.app/26",
+    "name": "Children choir"
+  },
+  {
+    "id": "y24b-41",
+    "title": "אביש בראדט",
+    "url": "https://music2.y24.app/41",
+    "name": "Avish Brodt"
+  },
+  {
+    "id": "y24-21",
+    "title": "אברהם פריעד",
+    "url": "https://music.y24.app/21",
+    "name": "Avraham Fried"
+  },
+  {
+    "id": "y24b-47",
+    "title": "אהר'לה סאמעט",
+    "url": "https://music2.y24.app/47",
+    "name": "Ahrele Samet"
+  },
+  {
+    "id": "y24-25",
+    "title": "אייזיק האניג",
+    "url": "https://music.y24.app/25",
+    "name": "Isaac Honig"
+  },
+  {
+    "id": "y24b-32",
+    "title": "בנציון שענקער",
+    "url": "https://music2.y24.app/32",
+    "name": "Ben Zion Shenker"
+  },
+  {
+    "id": "y24b-42",
+    "title": "בערי וועבער",
+    "url": "https://music2.y24.app/42",
+    "name": "Beri Weber"
+  },
+  {
+    "id": "y24b-43",
+    "title": "ברוך לוין",
+    "url": "https://music2.y24.app/43",
+    "name": "Baruch Levine"
+  },
+  {
+    "id": "y24b-48",
+    "title": "דודי קאליש",
+    "url": "https://music2.y24.app/48",
+    "name": "Dudi Kalish"
+  },
+  {
+    "id": "y24b-53",
+    "title": "זאנוויל וויינברגר",
+    "url": "https://music2.y24.app/53",
+    "name": "Zanvil Weinberger"
+  },
+  {
+    "id": "y24b-49",
+    "title": "יהודה גרין",
+    "url": "https://music2.y24.app/49",
+    "name": "Yehuda Green"
+  },
+  {
+    "id": "y24b-56",
+    "title": "יואלי קליין",
+    "url": "https://music2.y24.app/56",
+    "name": "Yoely Klein"
+  },
+  {
+    "id": "y24b-50",
+    "title": "יעקב דאסקאל",
+    "url": "https://music2.y24.app/50",
+    "name": "Yaakov Daskal"
+  },
+  {
+    "id": "y24-1054",
+    "title": "יעקב שוואקי",
+    "url": "https://music.y24.app/1054",
+    "name": "Yaakov Shwekey"
+  },
+  {
+    "id": "y24b-44",
+    "title": "ישראל ווערדיגער",
+    "url": "https://music2.y24.app/44",
+    "name": "Yisroel Werdyger"
+  },
+  {
+    "id": "y24b-57",
+    "title": "לוי פאלקאוויטש",
+    "url": "https://music2.y24.app/57",
+    "name": "Levy Falkowitz"
+  },
+  {
+    "id": "y24-22",
+    "title": "ליפא שמעלצער",
+    "url": "https://music.y24.app/22",
+    "name": "Lipa Schmeltzer"
+  },
+  {
+    "id": "y24b-34",
+    "title": "מאטי אילאוויטש",
+    "url": "https://music2.y24.app/34",
+    "name": "Motti Ilowitz"
+  },
+  {
+    "id": "y24b-51",
+    "title": "מוטי שטיינמץ",
+    "url": "https://music2.y24.app/51",
+    "name": "Motty Steinmetz"
+  },
+  {
+    "id": "y24-23",
+    "title": "מיכאל שניצלער",
+    "url": "https://music.y24.app/23",
+    "name": "Michoel Schnitzler"
+  },
+  {
+    "id": "y24-20",
+    "title": "מרדכי בן דוד",
+    "url": "https://music.y24.app/20",
+    "name": "Mordechai Ben David"
+  },
+  {
+    "id": "y24-24",
+    "title": "משה גאלדמאן",
+    "url": "https://music.y24.app/24",
+    "name": "Moshe Goldman"
+  },
+  {
+    "id": "y24b-45",
+    "title": "שלומי גרטנר",
+    "url": "https://music2.y24.app/45",
+    "name": "Shloime Gertner"
+  },
+  {
+    "id": "y24b-52",
+    "title": "שלומי דאסקאל",
+    "url": "https://music2.y24.app/52",
+    "name": "Shloime Daskal"
+  },
+  {
+    "id": "y24b-46",
+    "title": "שמחה ליינר",
+    "url": "https://music2.y24.app/46",
+    "name": "Simcha Leiner"
+  },
+  {
+    "id": "y24b-58",
+    "title": "שמילי אונגר",
+    "url": "https://music2.y24.app/58",
+    "name": "Shmily Ungar"
+  },
+  {
+    "id": "y24-1058",
+    "title": "וואקאליש",
+    "url": "https://music.y24.app/1058",
+    "name": "Vocal"
+  },
+  {
+    "id": "y24-1057",
+    "title": "מארש וואלס",
+    "url": "https://music.y24.app/1057",
+    "name": "March and waltz"
+  },
+  {
+    "id": "y24-1056",
+    "title": "ווארעם",
+    "url": "https://music.y24.app/1056",
+    "name": "Warm music"
+  },
+  {
+    "id": "y24-1055",
+    "title": "לעבעדיג",
+    "url": "https://music.y24.app/1055",
+    "name": "Lebedig"
+  }
+]

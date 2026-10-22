@@ -60,6 +60,7 @@ from .tuya_client import TuyaCloudError, tuya
 from .music import music_router
 from .lighting import lighting_router
 from .panel_wifi import wifi_router
+from .radio import radio_router
 
 BASE = Path(__file__).resolve().parent
 STATIC = BASE / "static"
@@ -114,6 +115,7 @@ def access_auth(
 app.include_router(music_router(access_auth))
 app.include_router(lighting_router(access_auth))
 app.include_router(wifi_router(access_auth))
+app.include_router(radio_router(access_auth))
 
 
 class LoginRequest(BaseModel):
