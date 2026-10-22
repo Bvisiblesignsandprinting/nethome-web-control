@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 
 SOURCE_URL = "https://www.yiddish24.com/streams"
 CATALOG_DATE = "2026-10-22"
-CATALOG_PATH = Path(__file__).parent / "data" / "yiddish24_stations.json"
+CATALOG_PATH = Path(__file__).parent / "static" / "yiddish24-stations.json"
 
 
 def stations():

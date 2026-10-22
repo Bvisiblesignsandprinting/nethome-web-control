@@ -22,6 +22,12 @@
       headers: {'Content-Type': 'application/json', ...options.headers},
     });
     if (response.status === 401) { location.assign('/login'); throw new Error('Please log in again.'); }
+    if (response.redirected && new URL(response.url, location.origin).pathname === '/login') {
+      location.assign('/login'); throw new Error('Please log in again.');
+    }
+    if (!response.headers.get('content-type')?.includes('application/json')) {
+      throw new Error('Music service is temporarily unavailable. Please refresh and try again.');
+    }
     const body = await response.json();
     if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Music request failed.');
     return body;
@@ -112,7 +118,7 @@
     const visible = radioStations.filter(row => (row.name + ' ' + row.title).toLowerCase().includes(query));
     if (!visible.length) {
       const empty = document.createElement('p'); empty.className = 'music-empty';
-      empty.textContent = radioLoading ? 'Loading stations…' : radioStations.length ? 'No stations match your search.' : 'Stations could not be loaded. Select Yiddish24 radio to retry.';
+      empty.textContent = radioLoading ? 'Loading stations…' : radioStations.length ? 'No stations match your search.' : 'Music could not be loaded. Select Yiddish24 to retry.';
       list.append(empty);
     }
     for (const row of visible) {
@@ -129,10 +135,27 @@
     }
   }
 
+  function validStation(row) {
+    if (!row || typeof row.id !== 'string' || typeof row.name !== 'string' || typeof row.title !== 'string') return false;
+    try {
+      const url = new URL(row.url);
+      return url.protocol === 'https:' && ['music.y24.app','music2.y24.app'].includes(url.hostname) && /^\/\d+$/.test(url.pathname) && !url.port && !url.username && !url.password && !url.search && !url.hash;
+    } catch { return false; }
+  }
+
   async function loadRadio() {
     if (radioLoading) return;
     radioLoading = true; renderRadio();
-    try { const result = await api('/radio/stations'); radioStations = result.stations; }
+    try {
+      // This catalog contains only public provider streams. Serve it with the
+      // player assets so listing and playing them needs no extra API roundtrip.
+      const response = await fetch('/static/yiddish24-stations.json', {cache:'no-cache', credentials:'same-origin'});
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Yiddish24 music could not be loaded. Select Yiddish24 to retry.');
+      const rows = await response.json();
+      if (!Array.isArray(rows) || !rows.length || !rows.every(validStation)) throw new Error('Yiddish24 music list is unavailable. Please refresh and try again.');
+      radioStations = rows;
+      state(rows.length + ' Yiddish24 music streams loaded.');
+    }
     catch (error) { state(error.message); }
     finally { radioLoading = false; renderRadio(); navigation(); }
   }
@@ -152,11 +175,10 @@
     currentRadio = station.id; currentId = null; audio.pause();
     state('Connecting to ' + station.name + '…');
     try {
-      const result = await api('/radio/stations/' + encodeURIComponent(station.id) + '/playback',{method:'POST'});
-      if (generation !== playbackGeneration) return;
-      audio.src = result.url;
+      if (!validStation(station)) throw new Error('This music stream is unavailable.');
+      audio.src = station.url;
       $('music-now-playing').textContent = station.name;
-      $('music-now-folder').textContent = 'Yiddish24 · Live radio';
+      $('music-now-folder').textContent = 'Yiddish24 · Live music';
       render(); renderRadio(); navigation();
       await audio.play();
       if (generation === playbackGeneration) state('Playing ' + station.name + ' · Yiddish24 live.');
@@ -169,16 +191,16 @@
     if (!currentRadio) return;
     cancelRadioRetry(); ++playbackGeneration; currentRadio = null; radioRetries = 0;
     audio.pause(); audio.removeAttribute('src'); audio.load();
-    $('music-now-playing').textContent = 'Choose music'; $('music-now-folder').textContent = 'Songs and live radio';
+    $('music-now-playing').textContent = 'Choose music'; $('music-now-folder').textContent = 'Songs and live music';
     render(); renderRadio(); navigation(); state('Radio stopped.');
   }
 
   function reconnectRadio() {
     const station = radioStations.find(row => row.id === currentRadio);
     if (!station || radioRetryTimer) return;
-    if (radioRetries >= 3) { state('Radio interrupted. Select the station again to reconnect.'); return; }
+    if (radioRetries >= 3) { state('Music stream interrupted. Select it again to reconnect.'); return; }
     const generation = playbackGeneration, id = currentRadio;
-    const delay = [3000,10000,30000][radioRetries++]; state('Radio interrupted. Reconnecting…');
+    const delay = [3000,10000,30000][radioRetries++]; state('Music stream interrupted. Reconnecting…');
     radioRetryTimer = setTimeout(() => {
       radioRetryTimer = null;
       if (generation === playbackGeneration && id === currentRadio) playRadio(station,true);

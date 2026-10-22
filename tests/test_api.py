@@ -70,3 +70,17 @@ def test_one_time_schedule_requires_date(client):
         'time_local':'18:00', 'mode':'Cool', 'temperature':72
     })
     assert r.status_code == 422
+
+
+def test_yiddish24_catalog_is_bundled_with_player_assets(client):
+    response = client.get('/static/yiddish24-stations.json')
+    assert response.status_code == 200
+    assert response.headers['content-type'].startswith('application/json')
+    rows = response.json()
+    assert len(rows) == 60
+    api_rows = client.get('/api/music/radio/stations').json()['stations']
+    assert [row['url'] for row in rows] == [row['url'] for row in api_rows]
+    html = client.get('/static/index.html').text
+    assert '>Yiddish24</button>' in html
+    assert 'LIVE MUSIC' in html
+    assert 'LIVE RADIO' not in html and 'Yiddish24 radio' not in html and 'Stop radio' not in html
