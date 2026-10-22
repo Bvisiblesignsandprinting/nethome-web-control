@@ -192,7 +192,7 @@
     cancelRadioRetry(); ++playbackGeneration; currentRadio = null; radioRetries = 0;
     audio.pause(); audio.removeAttribute('src'); audio.load();
     $('music-now-playing').textContent = 'Choose music'; $('music-now-folder').textContent = 'Songs and live music';
-    render(); renderRadio(); navigation(); state('Radio stopped.');
+    render(); renderRadio(); navigation(); state('Yiddish24 stopped.');
   }
 
   function reconnectRadio() {
