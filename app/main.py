@@ -438,6 +438,8 @@ def indoor_sensor():
             "ok": False,
             "offline": True,
             "error": str(exc)[:500],
+            "error_code": exc.code,
+            "retry_after_seconds": exc.retry_after,
             "source": "tuya-cloud",
         }
 
@@ -589,10 +591,13 @@ def schedules_interpret(body: SchedulePromptRequest):
 def smart_control_status():
     config = load_smart_control_config()
     sensor = None
+    sensor_error = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=300) if tuya.configured else None
+    except TuyaCloudError as exc:
+        sensor_error = str(exc)
     except Exception:
-        sensor = None
+        sensor_error = "Sensor unavailable"
 
     panel_config = {
         "enabled": bool(config.get("enabled")),
@@ -634,6 +639,7 @@ def smart_control_status():
             else "disabled"
         ),
         "sensor": sensor,
+        "sensor_error": sensor_error,
     }
 
 

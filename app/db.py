@@ -13,6 +13,48 @@ DB_PATH = Path(__file__).resolve().parent.parent / "data" / "nethome.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
 _LOCAL_CLOUD_LOCK = threading.RLock()
 _CLOUD_LOCK_KEY = 151732606
+_SENSOR_LOCK_KEY = 151732607
+_LOCAL_SENSOR_LOCK = threading.RLock()
+
+
+@contextmanager
+def sensor_operation_lock():
+    """Serialize sensor refreshes across serverless instances, independently of AC writes."""
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("set local lock_timeout = '25s'")
+            cur.execute("select pg_advisory_xact_lock(%s)", (_SENSOR_LOCK_KEY,))
+            yield
+    else:
+        with _LOCAL_SENSOR_LOCK:
+            yield
+
+
+def load_sensor_cache() -> dict[str, Any]:
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("select details from public.activity where source = 'tuya-cache' and action = 'sensor' order by id desc limit 1")
+            row = cur.fetchone()
+    else:
+        with _sqlite_conn() as conn:
+            row = conn.execute("select details from activity where source = 'tuya-cache' and action = 'sensor' order by id desc limit 1").fetchone()
+    if not row:
+        return {}
+    data = json.loads(row['details'])
+    return data if isinstance(data, dict) else {}
+
+
+def save_sensor_cache(data: dict[str, Any]) -> None:
+    """Bounded internal state in the existing store; never contains Tuya credentials."""
+    payload = json.dumps(data, separators=(",", ":"))
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("delete from public.activity where source = 'tuya-cache' and action = 'sensor'")
+            cur.execute("insert into public.activity(source, action, result, details) values ('tuya-cache', 'sensor', 'active', %s)", (payload,))
+    else:
+        with _sqlite_conn() as conn:
+            conn.execute("delete from activity where source = 'tuya-cache' and action = 'sensor'")
+            conn.execute("insert into activity(created_at, source, action, result, details) values (?, 'tuya-cache', 'sensor', 'active', ?)", (_now(), payload))
 
 
 def _now() -> str:
@@ -572,14 +614,14 @@ def list_activity(limit: int = 50) -> list[dict[str, Any]]:
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config', 'lighting-config') order by id desc limit %s",
+                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config', 'lighting-config', 'tuya-cache') order by id desc limit %s",
                 (limit,),
             )
             return [_normalize_row(r) for r in cur.fetchall()]
 
     with _sqlite_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config', 'lighting-config') ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config', 'lighting-config', 'tuya-cache') ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 

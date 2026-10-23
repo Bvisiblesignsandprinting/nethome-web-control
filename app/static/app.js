@@ -146,7 +146,7 @@ async function loadSmartControl(){
 
     if(state){
       const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      state.textContent=sensor&&sensor.ok?'Sensor '+(room??sensor.temperature_f)+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):'Sensor unavailable';
+      state.textContent=sensor&&sensor.ok?'Sensor '+(room??sensor.temperature_f)+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):(d.sensor_error?.includes('28841004')?'Sensor cloud allowance used up':d.sensor_error||'Sensor unavailable');
       state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');
     }
     return d;
