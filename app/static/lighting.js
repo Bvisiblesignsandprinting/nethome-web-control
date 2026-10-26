@@ -1,6 +1,21 @@
 /* Lighting drafts never issue AC commands or report a physical light state. */
 (() => {
   const $ = id => document.getElementById(id);
+  // A local preview until the waterfall pump's hardware/backend is connected.
+  let waterfallDraft = false;
+  try { waterfallDraft = localStorage.getItem('nethome-waterfall-pump-draft') === 'on'; } catch {}
+  const waterfallButton = $('waterfall-draft-toggle');
+  function renderWaterfallDraft() {
+    waterfallButton.textContent = 'Waterfall ' + (waterfallDraft ? 'On' : 'Off');
+    waterfallButton.setAttribute('aria-pressed', String(waterfallDraft));
+    $('waterfall-draft-state').textContent = 'Preview ' + (waterfallDraft ? 'On' : 'Off') + ' · Pump connection pending. Saved on this browser only.';
+  }
+  waterfallButton.addEventListener('click', () => {
+    waterfallDraft = !waterfallDraft;
+    try { localStorage.setItem('nethome-waterfall-pump-draft', waterfallDraft ? 'on' : 'off'); } catch {}
+    renderWaterfallDraft();
+  });
+  renderWaterfallDraft();
   const form = $('lighting-form');
   const field = name => form.elements.namedItem(name);
   let data = null, busy = false, editingId = null, previewGeneration = 0;

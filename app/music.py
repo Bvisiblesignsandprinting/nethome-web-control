@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field, field_validator
 
 from .config import settings
+from .panel_audio import PROFILE, convert_for_panel
 
 MAX_FILE_BYTES = 25 * 1024 * 1024
 FILE_PATTERN = re.compile(r"^[0-9a-f]{32}_[A-Za-z0-9_.-]{1,120}\.mp3$")
@@ -170,14 +171,50 @@ class MusicStorage:
         return {"id": name, "upload_url": self.absolute_signed_url(result["url"]),
                 "max_file_bytes": MAX_FILE_BYTES}
 
-    def playback(self, name: str):
+    def panel_copy(self, name: str) -> str:
+        """Return a cached derivative, creating it only from our private bucket."""
+        original = quote(f"{self.bucket}/tracks/{name}", safe="/")
+        info = self.request("GET", f"/object/info/{original}")
+        # Version the key with the original object metadata so replacements do
+        # not leave the panel listening to an older cached copy.
+        import hashlib
+        version = {key: info.get(key) for key in ('id', 'updated_at', 'size', 'metadata')}
+        stamp = hashlib.sha256(json.dumps(version, sort_keys=True).encode()).hexdigest()[:16]
+        relative = f"panel-audio/{PROFILE}/{stamp}/{name}"
+        path = quote(f"{self.bucket}/{relative}", safe="/")
+        try:
+            self.request("GET", f"/object/info/{path}")
+            return path
+        except HTTPException as exc:
+            if exc.status_code != 404:
+                raise
+        auth_headers = {"Authorization": f"Bearer {self.key}", "apikey": self.key}
+        # Authenticated object URLs are constructed internally. No caller-supplied
+        # URL or ffmpeg network input is accepted.
+        request = Request(self.origin + "/storage/v1/object/authenticated/" + original, headers=auth_headers)
+        try:
+            with urlopen(request, timeout=15) as source:
+                data = source.read(MAX_FILE_BYTES + 1)
+            audio = convert_for_panel(data)
+            upload = Request(self.origin + "/storage/v1/object/" + path, data=audio,
+                             method="POST", headers={**auth_headers, "Content-Type": "audio/mpeg", "x-upsert": "true"})
+            with urlopen(upload, timeout=15) as result:
+                result.read(1024)
+        except Exception:
+            raise HTTPException(502, "Could not prepare the smaller music copy. Please retry.") from None
+        return path
+
+    def playback(self, name: str, *, panel: bool = False):
         validate_object(name)
         self.check_bucket()
         path = quote(f"{self.bucket}/tracks/{name}", safe="/")
         self.request("GET", f"/object/info/{path}")
+        if panel:
+            path = self.panel_copy(name)
         result = self.request("POST", f"/object/sign/{path}", {"expiresIn": 3600})
         return {"url": self.absolute_signed_url(result["signedURL"]), "expires_in": 3600,
-                "playback_device": "browser"}
+                "playback_device": "panel" if panel else "browser",
+                **({"audio_profile": PROFILE, "bitrate_kbps": 32, "sample_rate": 22050, "channels": 1} if panel else {})}
 
     def delete(self, name: str):
         validate_object(name)
@@ -210,9 +247,9 @@ def music_router(auth: Callable) -> APIRouter:
         return storage.upload(body)
 
     @router.post("/tracks/{track_id:path}/playback")
-    def playback(track_id: str, response: Response):
+    def playback(track_id: str, response: Response, profile: str = Query(default="original", pattern="^(original|panel)$")):
         response.headers["Cache-Control"] = "no-store"
-        return storage.playback(track_id)
+        return storage.playback(track_id, panel=True) if profile == "panel" else storage.playback(track_id)
 
     @router.delete("/tracks/{track_id:path}")
     def delete(track_id: str):
