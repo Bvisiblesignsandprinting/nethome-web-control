@@ -5,6 +5,7 @@ This module intentionally makes no AC calls or claims of ESP32 playback support.
 from __future__ import annotations
 
 import json
+import logging
 import re
 import unicodedata
 from typing import Callable
@@ -192,15 +193,19 @@ class MusicStorage:
         # Authenticated object URLs are constructed internally. No caller-supplied
         # URL or ffmpeg network input is accepted.
         request = Request(self.origin + "/storage/v1/object/authenticated/" + original, headers=auth_headers)
+        stage = "download"
         try:
             with urlopen(request, timeout=15) as source:
                 data = source.read(MAX_FILE_BYTES + 1)
+            stage = "convert"
             audio = convert_for_panel(data)
+            stage = "upload"
             upload = Request(self.origin + "/storage/v1/object/" + path, data=audio,
                              method="POST", headers={**auth_headers, "Content-Type": "audio/mpeg", "x-upsert": "true"})
             with urlopen(upload, timeout=15) as result:
                 result.read(1024)
-        except Exception:
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Panel audio preparation failed stage=%s kind=%s status=%s", stage, type(exc).__name__, getattr(exc, "code", None))
             raise HTTPException(502, "Could not prepare the smaller music copy. Please retry.") from None
         return path
 
