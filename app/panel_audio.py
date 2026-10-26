@@ -3,13 +3,13 @@ from pathlib import Path
 import subprocess
 from tempfile import TemporaryDirectory
 
-import imageio_ffmpeg
-
 MAX_INPUT_BYTES = 25 * 1024 * 1024
 PROFILE = 'mono-32k-22050-v1'
 
 
 def convert_for_panel(data: bytes) -> bytes:
+    # A packaging issue must not prevent unrelated app routes from starting.
+    import imageio_ffmpeg
     if not data or len(data) > MAX_INPUT_BYTES:
         raise ValueError('Invalid track size')
     with TemporaryDirectory(prefix='nethome-audio-') as folder:
