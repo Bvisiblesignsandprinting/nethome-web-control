@@ -183,12 +183,12 @@ class MusicStorage:
         stamp = hashlib.sha256(json.dumps(version, sort_keys=True).encode()).hexdigest()[:16]
         relative = f"panel-audio/{PROFILE}/{stamp}/{name}"
         path = quote(f"{self.bucket}/{relative}", safe="/")
-        try:
-            self.request("GET", f"/object/info/{path}")
+        folder, leaf = relative.rsplit('/', 1)
+        cached = self.request("POST", f"/object/list/{self.bucket}", {
+            "prefix": folder, "limit": 100, "search": leaf,
+        })
+        if any(row.get('name') == leaf and row.get('id') for row in cached):
             return path
-        except HTTPException as exc:
-            if exc.status_code != 404:
-                raise
         auth_headers = {"Authorization": f"Bearer {self.key}", "apikey": self.key}
         # Authenticated object URLs are constructed internally. No caller-supplied
         # URL or ffmpeg network input is accepted.

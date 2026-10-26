@@ -41,6 +41,8 @@ def test_panel_cached_copy_uses_private_profile_and_leaves_original_unchanged():
         calls.append((method, path, payload))
         if path.startswith('/object/sign/'):
             return {'signedURL': '/object/sign/nethome-music/cached.mp3?token=test'}
+        if path.startswith('/object/list/'):
+            return [{'name': name, 'id': 'cached-id'}]
         return {'id': 'original-id', 'updated_at': '2026-10-26', 'size': 12345}
     with patch.object(storage, 'check_bucket'), patch.object(storage, 'request', request), patch('app.music.convert_for_panel') as convert:
         result = storage.playback(name, panel=True)
