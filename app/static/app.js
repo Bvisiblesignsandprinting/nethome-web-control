@@ -131,7 +131,7 @@ async function loadSmartControl(){
     if(targetSetting)targetSetting.textContent=target!=null?target+'°F':'--°F';
     if(sensorSetting){
       const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      sensorSetting.textContent=sensor&&sensor.ok?('Online'+(updated?' · '+updated:'')):'Unavailable';
+      sensorSetting.textContent=d.sensor_paused?'Paused · Smart Room is off':sensor&&sensor.ok?('Online'+(updated?' · '+updated:'')):'Unavailable';
     }
     if(lastSetting)lastSetting.textContent=d.last_command_at?new Date(d.last_command_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'No recent change';
 
@@ -141,13 +141,13 @@ async function loadSmartControl(){
       const modeLabel=(d.preferred_mode||'auto').replace(/^./,c=>c.toUpperCase());
       const sensorAge=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'unknown';
       detail.textContent=(enabled?'Smart Room is controlling the room. ':'Smart Room is currently off. ')+
-        `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · Sensor ${sensorAge}`;
+        `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · ${d.sensor_paused?'Sensor reads paused':'Sensor '+sensorAge}`;
     }
 
     if(state){
       const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      state.textContent=sensor&&sensor.ok?'Sensor '+(room??sensor.temperature_f)+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):(d.sensor_error?.includes('28841004')?'Sensor cloud allowance used up':d.sensor_error||'Sensor unavailable');
-      state.className='setting-state '+(sensor&&sensor.ok?'ok-text':'warning');
+      state.textContent=d.sensor_paused?'Sensor reads paused while Smart Room is off':sensor&&sensor.ok?'Sensor '+(room??sensor.temperature_f)+'°F · '+sensor.humidity+'% RH'+(updated?' · updated '+updated:''):(d.sensor_error?.includes('28841004')?'Sensor cloud allowance used up':d.sensor_error||'Sensor unavailable');
+      state.className='setting-state '+(d.sensor_paused?'':sensor&&sensor.ok?'ok-text':'warning');
     }
     return d;
   }catch(e){

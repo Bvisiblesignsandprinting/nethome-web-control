@@ -421,6 +421,17 @@ def device_status():
 
 @app.get("/api/indoor-sensor", dependencies=[Depends(access_auth)])
 def indoor_sensor():
+    # Every panel/browser uses this gate, including older firmware that still polls.
+    # Returning early avoids Tuya token, status and online-check requests entirely.
+    if not load_smart_control_config().get("enabled"):
+        return {
+            "ok": False,
+            "offline": False,
+            "paused": True,
+            "reason": "smart_control_disabled",
+            "message": "Sensor reads paused while Smart Room is off",
+            "source": "tuya-cloud",
+        }
     if not tuya.configured:
         raise HTTPException(status_code=503, detail="Tuya indoor sensor is not configured")
     try:
@@ -593,7 +604,7 @@ def smart_control_status():
     sensor = None
     sensor_error = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=300) if tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=300) if config.get("enabled") and tuya.configured else None
     except TuyaCloudError as exc:
         sensor_error = str(exc)
     except Exception:
@@ -639,6 +650,7 @@ def smart_control_status():
             else "disabled"
         ),
         "sensor": sensor,
+        "sensor_paused": not panel_config["enabled"],
         "sensor_error": sensor_error,
     }
 
