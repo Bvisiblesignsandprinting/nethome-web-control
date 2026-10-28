@@ -604,7 +604,7 @@ def smart_control_status():
     sensor = None
     sensor_error = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if config.get("enabled") and tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=40) if config.get("enabled") and tuya.configured else None
     except TuyaCloudError as exc:
         sensor_error = str(exc)
     except Exception:

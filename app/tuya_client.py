@@ -12,7 +12,7 @@ from urllib.request import Request, urlopen
 from .config import settings
 from .db import sensor_operation_lock, load_sensor_cache, save_sensor_cache
 
-SENSOR_REFRESH_SECONDS = 30
+SENSOR_REFRESH_SECONDS = 40
 
 
 class TuyaCloudError(RuntimeError):

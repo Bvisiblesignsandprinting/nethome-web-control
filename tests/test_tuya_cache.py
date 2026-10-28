@@ -30,9 +30,12 @@ def test_cold_instances_share_cache_and_short_cache_cannot_bypass(setup):
     assert TuyaCloudClient().indoor_sensor()['temperature_f']==71.6
     for _ in range(6):
         result=TuyaCloudClient().indoor_sensor(max_cache_age_seconds=20)
-        assert result['cached'] and result['cache_ttl_seconds']==30
+        assert result['cached'] and result['cache_ttl_seconds']==40
     assert len(calls)==2
-    clock.value+=30
+    clock.value+=39
+    assert TuyaCloudClient().indoor_sensor()['cached']
+    assert len(calls)==2
+    clock.value+=1
     assert not TuyaCloudClient().indoor_sensor()['cached']
     assert len(calls)==3  # only properties; online detail remains shared
     clock.value+=3601
@@ -106,13 +109,13 @@ def test_successful_legacy_five_minute_deadline_does_not_delay_refresh(setup):
     state = db.load_sensor_cache()
     state['next_fetch_at'] = clock.value + 300
     db.save_sensor_cache(state)
-    clock.value += 31
+    clock.value += 41
     result = TuyaCloudClient().indoor_sensor()
-    assert not result['cached'] and result['cache_ttl_seconds'] == 30
+    assert not result['cached'] and result['cache_ttl_seconds'] == 40
     assert len(calls) == 3
 
 
-def test_transient_network_failure_can_retry_after_thirty_seconds(setup, monkeypatch):
+def test_transient_network_failure_can_retry_after_forty_seconds(setup, monkeypatch):
     clock, calls = setup
     original = TuyaCloudClient._get
     def failed(self, path):
@@ -121,7 +124,7 @@ def test_transient_network_failure_can_retry_after_thirty_seconds(setup, monkeyp
     monkeypatch.setattr(TuyaCloudClient, '_get', failed)
     with pytest.raises(TuyaCloudError) as caught:
         TuyaCloudClient().indoor_sensor()
-    assert caught.value.retry_after == 30
+    assert caught.value.retry_after == 40
     monkeypatch.setattr(TuyaCloudClient, '_get', original)
-    clock.value += 30
+    clock.value += 40
     assert TuyaCloudClient().indoor_sensor()['ok']
