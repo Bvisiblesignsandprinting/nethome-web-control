@@ -124,7 +124,7 @@ def _smart_snapshot(midea_state: dict[str, Any] | None = None) -> dict[str, Any]
     config = load_smart_control_config()
     sensor = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if config.get("enabled") and tuya.configured else None
     except Exception:
         sensor = None
 
@@ -183,7 +183,7 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
         age = _format_age(sensor.get("updated_at"))
         lines.append(f"Sensor: {state}" + (f" • {age}" if age else ""))
     else:
-        lines.append("Sensor: Unavailable")
+        lines.append("Sensor: Paused while Smart Room is off" if not enabled else "Sensor: Unavailable")
     if snap["outside_temperature_f"] is not None:
         lines.append(f"Outside: {float(snap['outside_temperature_f']):g}°F")
     if snap["next_schedule"]:
@@ -222,7 +222,7 @@ def _full_status_reply(result: dict[str, Any]) -> str:
     preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
     room = snap.get("room_temperature_f")
     humidity = sensor.get("humidity")
-    sensor_state = "Online" if sensor and sensor.get("online") is not False else "Offline" if sensor else "Unavailable"
+    sensor_state = "Paused (Smart Room off)" if not enabled else "Online" if sensor and sensor.get("online") is not False else "Offline" if sensor else "Unavailable"
     age = _format_age(sensor.get("updated_at")) if sensor else None
 
     ac_power = "On" if result.get("running") else "Off"
@@ -251,7 +251,7 @@ def _full_status_reply(result: dict[str, Any]) -> str:
         ac_parts.append(f"💨 {fan}%")
     lines.append(" • ".join(ac_parts))
 
-    sensor_icon = "📡" if sensor_state == "Online" else "⚠️"
+    sensor_icon = "📡" if sensor_state == "Online" else "⏸️" if not enabled else "⚠️"
     sensor_line = f"{sensor_icon} Sensor {sensor_state}"
     if age:
         sensor_line += f" • {age}"

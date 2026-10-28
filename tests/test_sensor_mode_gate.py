@@ -4,7 +4,7 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from app import main, scheduler
+from app import main, scheduler, messaging
 from app.tuya_client import TuyaCloudError
 
 
@@ -17,10 +17,12 @@ def sensor_mode(monkeypatch):
     }
     cloud = SimpleNamespace(configured=True, indoor_sensor=Mock(return_value=sensor))
     activity = Mock()
-    for module in (main, scheduler):
+    for module in (main, scheduler, messaging):
         monkeypatch.setattr(module, "load_smart_control_config", lambda: config)
         monkeypatch.setattr(module, "tuya", cloud)
         monkeypatch.setattr(module, "add_activity", activity)
+    monkeypatch.setattr(messaging, "current_weather", lambda: {})
+    monkeypatch.setattr(messaging, "_next_schedule_line", lambda: None)
     return config, cloud, activity
 
 
@@ -33,6 +35,9 @@ def test_off_multiple_callers_and_scheduler_make_no_sensor_requests(sensor_mode)
         assert status["sensor_paused"] and status["sensor"] is None
         assert status["sensor_error"] is None and status["status"] == "disabled"
         assert scheduler.run_smart_control()["action"] == "none"
+        assert messaging._smart_snapshot()["sensor"] is None
+        assert "Paused while Smart Room is off" in messaging._smart_status_reply()
+        assert "Paused (Smart Room off)" in messaging._full_status_reply({})
     cloud.indoor_sensor.assert_not_called()
     activity.assert_not_called()
 
@@ -44,10 +49,12 @@ def test_switching_on_resumes_reads_and_switching_off_stops_them(sensor_mode):
     status = main.smart_control_status()
     assert status["status"] == "monitoring" and not status["sensor_paused"]
     cloud.indoor_sensor.assert_called_with(max_cache_age_seconds=300)
+    assert messaging._smart_snapshot()["sensor"]["temperature_f"] == 72.0
     cloud.indoor_sensor.reset_mock()
     config["enabled"] = False
     assert main.indoor_sensor()["paused"]
     assert main.smart_control_status()["sensor_paused"]
+    assert messaging._smart_snapshot()["sensor"] is None
     cloud.indoor_sensor.assert_not_called()
 
 
