@@ -48,7 +48,7 @@ def test_switching_on_resumes_reads_and_switching_off_stops_them(sensor_mode):
     assert main.indoor_sensor()["temperature_f"] == 72.0
     status = main.smart_control_status()
     assert status["status"] == "monitoring" and not status["sensor_paused"]
-    cloud.indoor_sensor.assert_called_with(max_cache_age_seconds=300)
+    cloud.indoor_sensor.assert_called_with(max_cache_age_seconds=30)
     assert messaging._smart_snapshot()["sensor"]["temperature_f"] == 72.0
     cloud.indoor_sensor.reset_mock()
     config["enabled"] = False

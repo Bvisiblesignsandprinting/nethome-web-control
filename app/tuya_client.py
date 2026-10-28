@@ -12,6 +12,8 @@ from urllib.request import Request, urlopen
 from .config import settings
 from .db import sensor_operation_lock, load_sensor_cache, save_sensor_cache
 
+SENSOR_REFRESH_SECONDS = 30
+
 
 class TuyaCloudError(RuntimeError):
     def __init__(self, message: str, *, code: str | None = None, retry_after: int = 0):
@@ -142,11 +144,11 @@ class TuyaCloudClient:
             access_token=self._get_access_token(),
         )
 
-    def indoor_sensor(self, *, max_cache_age_seconds: int = 300) -> dict:
-        # Callers cannot bypass the shared quota limit with a short/zero cache age.
+    def indoor_sensor(self, *, max_cache_age_seconds: int = SENSOR_REFRESH_SECONDS) -> dict:
+        # Share one recent reading across callers without a five-minute control lag.
         if not self.configured:
             raise TuyaCloudError("Tuya cloud settings are not configured")
-        cache_age = max(300, max_cache_age_seconds)
+        cache_age = max(SENSOR_REFRESH_SECONDS, max_cache_age_seconds)
         identity = [settings.tuya_base_url, settings.tuya_client_id, settings.tuya_device_id]
         try:
             with sensor_operation_lock():
@@ -157,26 +159,31 @@ class TuyaCloudClient:
                 sensor = state.get("sensor")
                 if sensor and 0 <= now - state.get("fetched_at", 0) < cache_age:
                     result = dict(sensor)
-                    result.update(cached=True, cache_age_seconds=int(now - state["fetched_at"]), cache_ttl_seconds=300)
+                    result.update(cached=True, cache_age_seconds=int(now - state["fetched_at"]), cache_ttl_seconds=SENSOR_REFRESH_SECONDS)
                     return result
-                if now < state.get("next_fetch_at", 0):
-                    raise TuyaCloudError(state.get("error") or "Sensor refresh is pending", code=state.get("error_code"), retry_after=int(state["next_fetch_at"] - now) + 1)
+                next_fetch_at = state.get("next_fetch_at", 0)
+                if sensor and state.get("error") is None:
+                    # Old successful cache rows may still carry a 300-second deadline.
+                    # Shorten that cooldown without resetting real error backoffs.
+                    next_fetch_at = min(next_fetch_at, state.get("fetched_at", 0) + SENSOR_REFRESH_SECONDS)
+                if now < next_fetch_at:
+                    raise TuyaCloudError(state.get("error") or "Sensor refresh is pending", code=state.get("error_code"), retry_after=int(next_fetch_at - now) + 1)
                 # Persist a reservation before contacting Tuya. A killed worker must
                 # not let another cold instance immediately repeat its cloud calls.
-                state.update(next_fetch_at=now + 300, error="Sensor refresh is pending", error_code=None)
+                state.update(next_fetch_at=now + SENSOR_REFRESH_SECONDS, error="Sensor refresh is pending", error_code=None)
                 save_sensor_cache(state)
                 detail_ttl = 600 if state.get("online") is False else 3600
                 check_online = now - state.get("detail_at", 0) >= detail_ttl
                 try:
                     result = self._fetch_sensor(check_online=check_online, cached_online=state.get("online"))
                 except TuyaCloudError as exc:
-                    delay = 21600 if exc.code in {"28841004", "28841104"} else 300
+                    delay = 21600 if exc.code in {"28841004", "28841104"} else SENSOR_REFRESH_SECONDS
                     state.update(error=str(exc), error_code=exc.code, next_fetch_at=time.time() + delay)
                     save_sensor_cache(state)
                     raise TuyaCloudError(str(exc), code=exc.code, retry_after=delay) from exc
                 fetched_at = time.time()
-                result.update(fetched_at=datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat(), cache_age_seconds=0, cache_ttl_seconds=300)
-                state.update(sensor=result, fetched_at=fetched_at, next_fetch_at=fetched_at + 300, error=None, error_code=None, online=result.get("online"))
+                result.update(fetched_at=datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat(), cache_age_seconds=0, cache_ttl_seconds=SENSOR_REFRESH_SECONDS)
+                state.update(sensor=result, fetched_at=fetched_at, next_fetch_at=fetched_at + SENSOR_REFRESH_SECONDS, error=None, error_code=None, online=result.get("online"))
                 if check_online:
                     state["detail_at"] = fetched_at
                 save_sensor_cache(state)
