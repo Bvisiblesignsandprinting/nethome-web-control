@@ -23,6 +23,7 @@ from .db import (load_sharing_record, save_sharing_record, sensor_operation_lock
 
 CLIENT_ID = 'HA_3y9q4ak7g4ephrvke'
 INTERVAL = 30
+IDLE_INTERVAL = 20 * 60
 ERROR_BACKOFF = 60
 # SDK errors and debugging output may contain tokens/URLs. Never publish them.
 logging.getLogger('tuya_sharing').disabled = True
@@ -57,7 +58,8 @@ def connection_status():
     session = _load('session')
     return {'connected': bool(session), 'source': 'tuya-sharing',
             'sensor_name': session.get('sensor_name') if session else None,
-            'interval_seconds': INTERVAL, 'computer_required': False}
+            'interval_seconds': INTERVAL, 'idle_interval_seconds': IDLE_INTERVAL,
+            'computer_required': False}
 
 
 def _login():
@@ -182,10 +184,10 @@ def normalize(status, online, session):
             'fetched_at': datetime.now(timezone.utc).isoformat(), 'cache_ttl_seconds': INTERVAL}
 
 
-def indoor_sensor(max_cache_age_seconds=INTERVAL):
-    # Shared by browser, panel, schedules and SMS. Off mode makes zero Tuya calls.
-    if not load_smart_control_config().get('enabled'):
-        raise SharingError('Sensor reads paused while Smart Room is off')
+def indoor_sensor(max_cache_age_seconds=INTERVAL, *, force=False):
+    # One shared cache serves background, panel, web and explicit requests.
+    interval = INTERVAL if load_smart_control_config().get('enabled') else IDLE_INTERVAL
+    cache_age = max(interval, max_cache_age_seconds)
     with sensor_operation_lock():
         session = _load('session')
         if not session:
@@ -195,16 +197,17 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL):
         if cache.get('identity') != identity:
             cache = {'identity': identity}
         now = time.time()
-        if cache.get('sensor'):
+        age = now - cache.get('fetched_at', 0)
+        if cache.get('sensor') and not cache.get('refresh_pending'):
             # Migrate successful 40-second reservations without clearing error backoff.
             cache['next_fetch_at'] = min(cache.get('next_fetch_at', now),
-                                        cache.get('fetched_at', 0) + INTERVAL)
-        if cache.get('sensor') and 0 <= now - cache.get('fetched_at', 0) < max(INTERVAL, max_cache_age_seconds):
+                                        cache.get('fetched_at', 0) + interval)
+        if cache.get('sensor') and 0 <= age < (5 if force else cache_age):
             return {**cache['sensor'], 'cached': True,
-                    'cache_age_seconds': int(now - cache['fetched_at'])}
-        if now < cache.get('next_fetch_at', 0):
+                    'cache_age_seconds': int(age), 'cache_ttl_seconds': interval}
+        if now < cache.get('next_fetch_at', 0) and (not force or not cache.get('sensor') or cache.get('refresh_pending')):
             raise SharingError('Sensor refresh is temporarily unavailable; retry shortly')
-        cache.update(next_fetch_at=now + INTERVAL)
+        cache.update(next_fetch_at=now + INTERVAL, refresh_pending=True)
         save_sensor_cache(cache)
         try:
             manager = _manager(session)
@@ -217,7 +220,8 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL):
             device = devices[0]
             status = {v['code']: v['value'] for v in device.get('status', []) if 'code' in v and 'value' in v}
             reading = normalize(status, device.get('online'), session)
-            cache.update(sensor=reading, fetched_at=time.time(), next_fetch_at=time.time() + INTERVAL)
+            reading['cache_ttl_seconds'] = interval
+            cache.update(sensor=reading, fetched_at=time.time(), next_fetch_at=time.time() + interval, refresh_pending=False)
             save_sensor_cache(cache)
             return reading
         except SharingError:

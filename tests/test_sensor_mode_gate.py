@@ -10,6 +10,8 @@ from app.tuya_client import TuyaCloudError
 
 @pytest.fixture
 def sensor_mode(monkeypatch):
+    # Legacy project behavior remains gated; the new policy applies to account sharing.
+    monkeypatch.setattr(main.sharing, 'configured', lambda: False)
     config = {"enabled": False, "target_temperature_f": 73}
     sensor = {
         "ok": True, "temperature_f": 72.0, "humidity": 45,
@@ -77,3 +79,14 @@ def test_disabled_unconfigured_sensor_still_returns_paused(sensor_mode):
     cloud.configured = False
     assert main.indoor_sensor()["paused"]
     cloud.indoor_sensor.assert_not_called()
+
+
+def test_sharing_sensor_remains_visible_with_smart_off(sensor_mode,monkeypatch):
+    _,cloud,_=sensor_mode
+    monkeypatch.setattr(main.sharing,'configured',lambda:True)
+    assert main.indoor_sensor()['temperature_f']==72.0
+    status=main.smart_control_status()
+    assert status['sensor_idle'] and not status['sensor_paused']
+    assert status['sensor_refresh_seconds']==1200
+    assert messaging._smart_snapshot()['sensor']['temperature_f']==72.0
+    assert 'Online' in messaging._full_status_reply({})

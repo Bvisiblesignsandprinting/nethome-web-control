@@ -101,6 +101,7 @@
               <button type="button" id="dashboard-smart-up" aria-label="Raise Smart Room target">+</button>
             </div>
             <div id="dashboard-smart-detail" class="smart-room-detail">Loading Smart Room status…</div>
+            <button type="button" id="refresh-room-sensor" class="soft-action">↻ Refresh sensor</button>
           </section>
 
           <div class="feature-row">
@@ -312,6 +313,7 @@
             <div style="width:100%">
               <h2>Smart Room Control</h2>
               <p><a href="/sensor-setup">Connect or check room sensor</a></p>
+              <button type="button" id="settings-refresh-room-sensor" class="soft-action">↻ Refresh sensor</button>
               <p>Use the Tuya room sensor as the true room temperature. NetHome automatically trims the Midea setpoint in the background to hold the room target without rapid command changes.</p>
               <div class="smart-settings-summary" id="smart-settings-summary">
                 <div><span>🌡️ Room</span><strong id="settings-room-temp">--°F</strong></div>

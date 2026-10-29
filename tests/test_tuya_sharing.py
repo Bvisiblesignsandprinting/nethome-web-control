@@ -56,11 +56,66 @@ def test_30_second_cache_across_instances_and_concurrency(setup):
     assert rows[0]['measurement_time_verified'] is False
 
 
-def test_off_mode_does_not_call_tuya(setup, monkeypatch):
+def test_off_mode_refreshes_only_every_twenty_minutes(setup, monkeypatch):
+    _,clock,calls=setup
+    monkeypatch.setattr(sharing,'load_smart_control_config',lambda:{'enabled':False})
+    assert sharing.indoor_sensor()['cache_ttl_seconds']==1200
+    clock.now+=1199
+    assert sharing.indoor_sensor()['cached']
+    assert len(calls)==1
+    clock.now+=1
+    assert not sharing.indoor_sensor()['cached']
+    assert len(calls)==2
+
+
+def test_manual_request_bypasses_idle_cache_but_deduplicates(setup,monkeypatch):
+    _,clock,calls=setup
+    monkeypatch.setattr(sharing,'load_smart_control_config',lambda:{'enabled':False})
+    sharing.indoor_sensor()
+    clock.now+=10
+    assert not sharing.indoor_sensor(force=True)['cached']
+    assert sharing.indoor_sensor(force=True)['cached']
+    assert len(calls)==2
+    clock.now+=10
+    sharing.indoor_sensor()
+    assert len(calls)==2
+
+
+def test_switching_on_shortens_idle_cache_without_heat_command(setup,monkeypatch):
+    _,clock,calls=setup
+    mode={'enabled':False}
+    monkeypatch.setattr(sharing,'load_smart_control_config',lambda:mode)
+    sharing.indoor_sensor()
+    clock.now+=31
+    mode['enabled']=True
+    assert not sharing.indoor_sensor()['cached']
+    assert len(calls)==2
+
+
+def test_manual_request_cannot_bypass_error_backoff(setup,monkeypatch):
+    _,clock,calls=setup
+    sharing.indoor_sensor()
+    clock.now+=10
+    def fail(*args,**kwargs):
+        calls.append(1)
+        raise RuntimeError('network error')
+    monkeypatch.setattr(sharing,'_manager',fail)
+    with pytest.raises(sharing.SharingError):sharing.indoor_sensor(force=True)
+    clock.now+=10
+    with pytest.raises(sharing.SharingError,match='temporarily'):sharing.indoor_sensor(force=True)
+    assert len(calls)==2
+
+
+def test_background_runner_reads_off_mode_sensor_without_browser(setup,monkeypatch):
+    from app import scheduler
     _,_,calls=setup
     monkeypatch.setattr(sharing,'load_smart_control_config',lambda:{'enabled':False})
-    with pytest.raises(sharing.SharingError,match='paused'):sharing.indoor_sensor()
-    assert not calls
+    monkeypatch.setattr(scheduler,'load_smart_control_config',lambda:{'enabled':False})
+    monkeypatch.setattr(scheduler,'list_schedules',lambda:[])
+    monkeypatch.setattr(scheduler,'tuya',S(indoor_sensor=sharing.indoor_sensor))
+    monkeypatch.setattr(scheduler.midea,'command',lambda *a,**kw:pytest.fail('No HVAC commands in idle mode'))
+    assert scheduler.run_due_schedules()['sensor_monitor']['temperature_f']==65.8
+    assert len(calls)==1
 
 
 def test_expired_data_not_reused_after_error_and_backoff(setup,monkeypatch):

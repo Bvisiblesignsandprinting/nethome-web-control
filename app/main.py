@@ -472,7 +472,7 @@ def device_status():
 def indoor_sensor():
     # Every panel/browser uses this gate, including older firmware that still polls.
     # Returning early avoids Tuya token, status and online-check requests entirely.
-    if not load_smart_control_config().get("enabled"):
+    if not load_smart_control_config().get("enabled") and not sharing.configured():
         return {
             "ok": False,
             "offline": False,
@@ -502,6 +502,17 @@ def indoor_sensor():
             "retry_after_seconds": exc.retry_after,
             "source": "tuya-cloud",
         }
+
+
+@app.post('/api/indoor-sensor/refresh', dependencies=[Depends(access_auth)])
+def refresh_indoor_sensor(request: Request):
+    sensor_setup_origin(request)
+    if not sharing.configured():
+        raise HTTPException(status_code=503, detail='Connect the sensor in Settings first')
+    try:
+        return tuya.indoor_sensor(force=True)
+    except TuyaCloudError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from None
 
 
 @app.post("/api/device/command", dependencies=[Depends(access_auth)])
@@ -653,7 +664,7 @@ def smart_control_status():
     sensor = None
     sensor_error = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if config.get("enabled") and tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if (config.get("enabled") or sharing.configured()) and tuya.configured else None
     except TuyaCloudError as exc:
         sensor_error = str(exc)
     except Exception:
@@ -699,7 +710,9 @@ def smart_control_status():
             else "disabled"
         ),
         "sensor": sensor,
-        "sensor_paused": not panel_config["enabled"],
+        "sensor_paused": not panel_config["enabled"] and not sharing.configured(),
+        "sensor_idle": not panel_config["enabled"] and sharing.configured(),
+        "sensor_refresh_seconds": 30 if panel_config["enabled"] else 1200,
         "sensor_error": sensor_error,
     }
 

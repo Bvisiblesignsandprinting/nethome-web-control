@@ -120,11 +120,13 @@ def _next_schedule_line() -> str | None:
     return None
 
 
-def _smart_snapshot(midea_state: dict[str, Any] | None = None) -> dict[str, Any]:
+def _smart_snapshot(midea_state: dict[str, Any] | None = None, *, force_sensor: bool = False) -> dict[str, Any]:
     config = load_smart_control_config()
     sensor = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if config.get("enabled") and tuya.configured else None
+        from . import tuya_sharing_client as sharing
+        if tuya.configured and (config.get('enabled') or sharing.configured()):
+            sensor = tuya.indoor_sensor(force=True) if force_sensor else tuya.indoor_sensor(max_cache_age_seconds=30)
     except Exception:
         sensor = None
 
@@ -222,7 +224,7 @@ def _full_status_reply(result: dict[str, Any]) -> str:
     preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
     room = snap.get("room_temperature_f")
     humidity = sensor.get("humidity")
-    sensor_state = "Paused (Smart Room off)" if not enabled else "Online" if sensor and sensor.get("online") is not False else "Offline" if sensor else "Unavailable"
+    sensor_state = ("Online" if sensor.get('online') is not False else "Offline") if sensor else ("Paused (Smart Room off)" if not enabled else "Unavailable")
     age = _format_age(sensor.get("updated_at")) if sensor else None
 
     ac_power = "On" if result.get("running") else "Off"
@@ -336,7 +338,7 @@ def _handle_smart_command(command: str, raw_text: str) -> dict[str, Any] | None:
         return _set_smart_config({"min_command_interval_minutes": value}, f"Smart command interval {value} min")
 
     if text in {"SENSOR", "ROOM SENSOR", "SENSOR STATUS"}:
-        snap = _smart_snapshot()
+        snap = _smart_snapshot(force_sensor=True)
         sensor = snap["sensor"]
         if not sensor:
             return {"ok": False, "reply": "⚠️ Room sensor is unavailable."}

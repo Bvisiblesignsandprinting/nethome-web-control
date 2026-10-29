@@ -131,7 +131,7 @@ async function loadSmartControl(){
     if(targetSetting)targetSetting.textContent=target!=null?target+'°F':'--°F';
     if(sensorSetting){
       const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      sensorSetting.textContent=d.sensor_paused?'Paused · Smart Room is off':sensor&&sensor.ok?('Online'+(sensor.measurement_time_verified===false?' · Update time unverified':updated?' · '+updated:'')):'Unavailable';
+      sensorSetting.textContent=d.sensor_paused?'Paused · Smart Room is off':sensor&&sensor.ok?('Online'+(d.sensor_idle?' · 20-minute updates':sensor.measurement_time_verified===false?' · Update time unverified':updated?' · '+updated:'')):'Unavailable';
     }
     if(lastSetting)lastSetting.textContent=d.last_command_at?new Date(d.last_command_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'No recent change';
 
@@ -141,7 +141,7 @@ async function loadSmartControl(){
       const modeLabel=(d.preferred_mode||'auto').replace(/^./,c=>c.toUpperCase());
       const sensorAge=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'unknown';
       detail.textContent=(enabled?(sensor?.measurement_time_verified===false?'Waiting for a verified sensor update. ':'Smart Room is controlling the room. '):'Smart Room is currently off. ')+
-        `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · ${d.sensor_paused?'Sensor reads paused':'Sensor '+sensorAge}`;
+        `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · ${d.sensor_paused?'Sensor reads paused':d.sensor_idle?'Sensor refreshes every 20 minutes':'Sensor '+sensorAge}`;
     }
 
     if(state){
@@ -276,6 +276,15 @@ qs('#eco-btn').addEventListener('click',()=>toggleFeature('eco_mode','#eco-btn',
 qs('#boost-btn').addEventListener('click',()=>toggleFeature('turbo','#boost-btn','Boost'));
 qs('#sleep-btn').addEventListener('click',()=>toggleFeature('comfort_sleep','#sleep-btn','Sleep'));
 qs('#refresh-status').addEventListener('click',refreshStatus);qs('#refresh-activity').addEventListener('click',loadActivity);
+async function requestRoomSensor(){
+  const buttons=[qs('#refresh-room-sensor'),qs('#settings-refresh-room-sensor')].filter(Boolean);
+  buttons.forEach(b=>b.disabled=true);
+  try{await jfetch('/api/indoor-sensor/refresh',{method:'POST',body:'{}'});await loadSmartControl();}
+  catch(e){const label=qs('#dashboard-smart-detail');if(label)label.textContent=e.message;}
+  finally{buttons.forEach(b=>b.disabled=false);}
+}
+qs('#refresh-room-sensor')?.addEventListener('click',requestRoomSensor);
+qs('#settings-refresh-room-sensor')?.addEventListener('click',requestRoomSensor);
 const smsSave=qs('#save-sms-config');if(smsSave)smsSave.addEventListener('click',saveSmsConfig);
 const smsCopy=qs('#copy-sms-webhook');if(smsCopy)smsCopy.addEventListener('click',copySmsWebhook);
 qs('#schedule-ai-preview')?.addEventListener('click',previewAiSchedule);

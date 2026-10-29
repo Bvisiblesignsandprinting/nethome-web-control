@@ -618,5 +618,12 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
 
         summary["executions"].append(item)
 
+    # The existing always-on runner keeps the sensor available even with no open browser.
+    from . import tuya_sharing_client as sharing
+    if not load_smart_control_config().get('enabled') and sharing.configured():
+        try:
+            summary['sensor_monitor'] = tuya.indoor_sensor()
+        except TuyaCloudError:
+            summary['sensor_monitor'] = {'ok': False, 'error': 'Sensor refresh unavailable'}
     summary["smart_control"] = run_smart_control(now_utc)
     return summary

@@ -147,10 +147,11 @@ class TuyaCloudClient:
             access_token=self._get_access_token(),
         )
 
-    def indoor_sensor(self, *, max_cache_age_seconds: int | None = None) -> dict:
+    def indoor_sensor(self, *, max_cache_age_seconds: int | None = None, force: bool = False) -> dict:
         if sharing.configured():
             try:
-                return sharing.indoor_sensor(max_cache_age_seconds if max_cache_age_seconds is not None else sharing.INTERVAL)
+                interval = max_cache_age_seconds if max_cache_age_seconds is not None else sharing.INTERVAL
+                return sharing.indoor_sensor(interval, force=True) if force else sharing.indoor_sensor(interval)
             except Exception:
                 # Never fall back to the exhausted developer project, or leak SDK URLs.
                 raise TuyaCloudError('Tuya sensor connection could not refresh. Check sensor setup in Settings.',
