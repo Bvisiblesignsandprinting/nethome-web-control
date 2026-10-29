@@ -156,7 +156,7 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         return result
 
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=20)
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=15)
     except TuyaCloudError as exc:
         add_activity("smart-control", "sensor", "error", str(exc)[:500])
         result["action"] = "skipped"
@@ -452,7 +452,7 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 # temperature instead of acting on old room data.
                 sensor_ready = False
                 try:
-                    sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
+                    sensor = tuya.indoor_sensor(max_cache_age_seconds=15) if tuya.configured else None
                     if sensor and sensor.get("ok") and sensor.get("online") is not False and sensor.get('measurement_time_verified') is not False:
                         updated_at = sensor.get("updated_at")
                         if updated_at:

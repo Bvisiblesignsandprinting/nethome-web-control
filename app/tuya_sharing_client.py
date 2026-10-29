@@ -22,7 +22,8 @@ from .db import (load_sharing_record, save_sharing_record, sensor_operation_lock
                  load_sensor_cache, save_sensor_cache, load_smart_control_config)
 
 CLIENT_ID = 'HA_3y9q4ak7g4ephrvke'
-INTERVAL = 40
+INTERVAL = 15
+ERROR_BACKOFF = 60
 # SDK errors and debugging output may contain tokens/URLs. Never publish them.
 logging.getLogger('tuya_sharing').disabled = True
 
@@ -194,6 +195,10 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL):
         if cache.get('identity') != identity:
             cache = {'identity': identity}
         now = time.time()
+        if cache.get('sensor'):
+            # Migrate successful 40-second reservations without clearing error backoff.
+            cache['next_fetch_at'] = min(cache.get('next_fetch_at', now),
+                                        cache.get('fetched_at', 0) + INTERVAL)
         if cache.get('sensor') and 0 <= now - cache.get('fetched_at', 0) < max(INTERVAL, max_cache_age_seconds):
             return {**cache['sensor'], 'cached': True,
                     'cache_age_seconds': int(now - cache['fetched_at'])}
@@ -217,9 +222,11 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL):
             return reading
         except SharingError:
             cache.pop('sensor', None)
+            cache['next_fetch_at'] = time.time() + ERROR_BACKOFF
             save_sensor_cache(cache)
             raise
         except Exception:
             cache.pop('sensor', None)
+            cache['next_fetch_at'] = time.time() + ERROR_BACKOFF
             save_sensor_cache(cache)
             raise SharingError('Sensor refresh failed; no stale reading was used') from None
