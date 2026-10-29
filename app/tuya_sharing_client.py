@@ -22,7 +22,7 @@ from .db import (load_sharing_record, save_sharing_record, sensor_operation_lock
                  load_sensor_cache, save_sensor_cache, load_smart_control_config)
 
 CLIENT_ID = 'HA_3y9q4ak7g4ephrvke'
-INTERVAL = 15
+INTERVAL = 30
 ERROR_BACKOFF = 60
 # SDK errors and debugging output may contain tokens/URLs. Never publish them.
 logging.getLogger('tuya_sharing').disabled = True

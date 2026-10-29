@@ -124,7 +124,7 @@ def _smart_snapshot(midea_state: dict[str, Any] | None = None) -> dict[str, Any]
     config = load_smart_control_config()
     sensor = None
     try:
-        sensor = tuya.indoor_sensor(max_cache_age_seconds=15) if config.get("enabled") and tuya.configured else None
+        sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if config.get("enabled") and tuya.configured else None
     except Exception:
         sensor = None
 

@@ -41,13 +41,13 @@ def test_encrypted_credentials_are_not_in_activity(setup):
     assert db.list_activity()==[]
 
 
-def test_15_second_cache_across_instances_and_concurrency(setup):
+def test_30_second_cache_across_instances_and_concurrency(setup):
     _,clock,calls=setup
     with ThreadPoolExecutor(max_workers=5) as pool:
         rows=list(pool.map(lambda _:sharing.indoor_sensor(1),range(5)))
     assert len(calls)==1
     assert all(row['temperature_f']==65.8 and row['humidity']==49 for row in rows)
-    clock.now+=14
+    clock.now+=29
     assert sharing.indoor_sensor(1)['cached']
     clock.now+=1
     assert not sharing.indoor_sensor(1)['cached']
@@ -139,11 +139,11 @@ def test_migrates_old_40_second_cache_without_resetting_error_backoff(setup,monk
     cached=db.load_sensor_cache()
     cached['next_fetch_at']=clock.now+40
     db.save_sensor_cache(cached)
-    clock.now+=15
+    clock.now+=30
     sharing.indoor_sensor()
     assert len(calls)==2
     # A failed refresh must wait 60 seconds, even after a new process starts.
-    clock.now+=15
+    clock.now+=30
     monkeypatch.setattr(sharing,'_manager',lambda *a,**kw:(_ for _ in ()).throw(RuntimeError('failed')))
     with pytest.raises(sharing.SharingError):sharing.indoor_sensor()
     clock.now+=59
@@ -155,4 +155,4 @@ def test_default_client_dispatch_does_not_keep_40_second_delay(setup,monkeypatch
     intervals=[]
     monkeypatch.setattr(sharing,'indoor_sensor',lambda interval:intervals.append(interval) or {'ok':True})
     legacy.TuyaCloudClient().indoor_sensor()
-    assert intervals==[15]
+    assert intervals==[30]
