@@ -1,0 +1,19 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Room sensor · NetHome</title>
+<style>body{margin:0;background:#10151f;color:#edf2fa;font:17px system-ui}main{max-width:620px;margin:40px auto;padding:28px;background:#1c2534;border-radius:20px}p{line-height:1.6;color:#c2ccda}a{color:#91baff}input{box-sizing:border-box;width:100%;padding:14px;font:inherit;border:1px solid #64748b;border-radius:10px;background:#10151f;color:white}button{padding:14px 22px;margin:16px 0;background:#3979ec;color:white;border:0;border-radius:10px;font:inherit;cursor:pointer}button:disabled{opacity:.5}label{display:block;margin:12px 0}#qr{display:block;background:white;padding:12px;width:280px;max-width:85%;margin:20px auto}#status{padding:16px;background:#111c2d;border-radius:12px}[hidden]{display:none!important}</style>
+<main><a href="/">← Back to NetHome</a><h1>Connect your room sensor</h1>
+<p>Use your existing Tuya Smart or Smart Life account. This connection works without the Tuya developer trial and does not require this computer to stay on.</p>
+<form id="form"><label for="code">Tuya User Code</label><input id="code" type="password" autocomplete="off" maxlength="128" required><p>In the app: Me → gear icon → Account and Security → User Code.</p><button id="begin">Prepare QR code</button></form>
+<img id="qr" hidden alt="Scan in your Tuya app and review the connection request"><button id="confirm" hidden>I approved the connection</button>
+<p id="status" role="status">Checking connection…</p>
+<p id="reading" hidden></p>
+<p>Sensor reads pause while Smart Room is off. When on, refreshes are at least 40 seconds apart. Setup checks the sensor once. Connecting does not turn on Smart Room or change the heater.</p>
+<p>The connection returns the latest reported values. Automatic temperature control stays paused if the measurement time cannot be verified.</p>
+</main><script>
+const el=id=>document.getElementById(id);
+async function request(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||'Connection unavailable');return d;}
+function show(d){if(d.connected){el('qr').hidden=true;el('confirm').hidden=true;el('form').hidden=true;el('status').textContent='Connected: '+(d.sensor_name||'Room sensor')+'.';if(d.sensor){el('reading').hidden=false;el('reading').textContent=d.sensor.temperature_f+'°F · Humidity '+d.sensor.humidity+'% · Latest reported values';}}else{el('status').textContent=d.pending?'Waiting for approval in your Tuya app.':'Ready to connect.';}}
+el('form').onsubmit=async e=>{e.preventDefault();el('begin').disabled=true;try{const d=await request('/api/sensor-sharing/begin',{code:el('code').value});el('code').value='';el('qr').src=d.qr;el('qr').hidden=false;el('confirm').hidden=false;el('status').textContent='In Tuya Smart, tap + → Scan. Scan this code and review the requested access.';}catch(e){el('status').textContent=e.message;}finally{el('begin').disabled=false;}};
+el('confirm').onclick=async()=>{el('confirm').disabled=true;try{show(await request('/api/sensor-sharing/confirm',{}));}catch(e){el('status').textContent=e.message;}finally{el('confirm').disabled=false;}};
+request('/api/sensor-sharing').then(show).catch(e=>el('status').textContent=e.message);
+</script></html>

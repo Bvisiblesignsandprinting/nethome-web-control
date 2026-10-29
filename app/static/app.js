@@ -131,7 +131,7 @@ async function loadSmartControl(){
     if(targetSetting)targetSetting.textContent=target!=null?target+'°F':'--°F';
     if(sensorSetting){
       const updated=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'';
-      sensorSetting.textContent=d.sensor_paused?'Paused · Smart Room is off':sensor&&sensor.ok?('Online'+(updated?' · '+updated:'')):'Unavailable';
+      sensorSetting.textContent=d.sensor_paused?'Paused · Smart Room is off':sensor&&sensor.ok?('Online'+(sensor.measurement_time_verified===false?' · Update time unverified':updated?' · '+updated:'')):'Unavailable';
     }
     if(lastSetting)lastSetting.textContent=d.last_command_at?new Date(d.last_command_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'No recent change';
 
@@ -140,7 +140,7 @@ async function loadSmartControl(){
       const presetLabel=activePreset==='all_day'?'All Day':activePreset==='sleeping'?'Sleeping':activePreset==='sudah'?'Sudah':'Custom';
       const modeLabel=(d.preferred_mode||'auto').replace(/^./,c=>c.toUpperCase());
       const sensorAge=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'unknown';
-      detail.textContent=(enabled?'Smart Room is controlling the room. ':'Smart Room is currently off. ')+
+      detail.textContent=(enabled?(sensor?.measurement_time_verified===false?'Waiting for a verified sensor update. ':'Smart Room is controlling the room. '):'Smart Room is currently off. ')+
         `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · ${d.sensor_paused?'Sensor reads paused':'Sensor '+sensorAge}`;
     }
 

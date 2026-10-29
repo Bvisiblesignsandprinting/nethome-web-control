@@ -11,6 +11,7 @@ from urllib.request import Request, urlopen
 
 from .config import settings
 from .db import sensor_operation_lock, load_sensor_cache, save_sensor_cache
+from . import tuya_sharing_client as sharing
 
 SENSOR_REFRESH_SECONDS = 40
 
@@ -30,6 +31,8 @@ class TuyaCloudClient:
 
     @property
     def configured(self) -> bool:
+        if sharing.configured():
+            return True
         return bool(
             settings.tuya_client_id
             and settings.tuya_client_secret
@@ -145,6 +148,13 @@ class TuyaCloudClient:
         )
 
     def indoor_sensor(self, *, max_cache_age_seconds: int = SENSOR_REFRESH_SECONDS) -> dict:
+        if sharing.configured():
+            try:
+                return sharing.indoor_sensor(max_cache_age_seconds)
+            except Exception:
+                # Never fall back to the exhausted developer project, or leak SDK URLs.
+                raise TuyaCloudError('Tuya sensor connection could not refresh. Check sensor setup in Settings.',
+                                     retry_after=SENSOR_REFRESH_SECONDS) from None
         # Share one recent reading across callers without a five-minute control lag.
         if not self.configured:
             raise TuyaCloudError("Tuya cloud settings are not configured")

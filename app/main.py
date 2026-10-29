@@ -57,6 +57,7 @@ from .models import (
 from .scheduler import run_due_schedules
 from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
+from . import tuya_sharing_client as sharing
 from .music import music_router
 from .lighting import lighting_router
 from .panel_wifi import wifi_router
@@ -120,6 +121,54 @@ app.include_router(radio_router(access_auth))
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class SensorSharingCode(BaseModel):
+    code: str
+
+
+def sensor_setup_origin(request: Request):
+    origin = request.headers.get('origin')
+    if origin and origin.rstrip('/') != str(request.base_url).rstrip('/'):
+        raise HTTPException(status_code=403, detail='Open sensor setup on this website')
+
+
+@app.get('/sensor-setup', dependencies=[Depends(access_auth)])
+def sensor_setup_page():
+    return FileResponse(STATIC / 'sensor-setup.html', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/api/sensor-sharing', dependencies=[Depends(access_auth)])
+def sensor_sharing_status():
+    try:
+        return sharing.connection_status()
+    except Exception:
+        raise HTTPException(status_code=503, detail='Sensor connection status unavailable') from None
+
+
+@app.post('/api/sensor-sharing/begin', dependencies=[Depends(access_auth)])
+def sensor_sharing_begin(body: SensorSharingCode, request: Request):
+    sensor_setup_origin(request)
+    code = body.code.strip()
+    if not code or len(code) > 128:
+        raise HTTPException(status_code=400, detail='Enter your Tuya User Code')
+    try:
+        return sharing.begin(code)
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=502, detail='Tuya connection could not be prepared') from None
+
+
+@app.post('/api/sensor-sharing/confirm', dependencies=[Depends(access_auth)])
+def sensor_sharing_confirm(request: Request):
+    sensor_setup_origin(request)
+    try:
+        return sharing.confirm()
+    except sharing.SharingError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except Exception:
+        raise HTTPException(status_code=502, detail='Tuya connection could not complete') from None
 
 
 @app.get("/api/panel/firmware", dependencies=[Depends(access_auth)])

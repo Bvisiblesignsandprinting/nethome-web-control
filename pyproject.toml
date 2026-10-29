@@ -12,7 +12,10 @@ dependencies = [
   "pip-system-certs>=4,<5",
   "psycopg[binary]>=3.2,<4",
   "mcp>=1.26,<2",
-  "imageio-ffmpeg==0.6.0"
+  "imageio-ffmpeg==0.6.0",
+  "tuya-device-sharing-sdk==0.2.15",
+  "cryptography==46.0.3",
+  "qrcode==8.2"
 ]
 
 [tool.vercel]

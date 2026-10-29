@@ -61,6 +61,32 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def load_sharing_record(action: str) -> str | None:
+    if action not in {'session', 'pending'}:
+        raise ValueError('Invalid sharing record')
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("select details from public.activity where source='tuya-sharing' and action=%s order by id desc limit 1", (action,))
+            row = cur.fetchone()
+    else:
+        with _sqlite_conn() as conn:
+            row = conn.execute("select details from activity where source='tuya-sharing' and action=? order by id desc limit 1", (action,)).fetchone()
+    return row['details'] if row else None
+
+
+def save_sharing_record(action: str, encrypted: str) -> None:
+    if action not in {'session', 'pending'}:
+        raise ValueError('Invalid sharing record')
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("delete from public.activity where source='tuya-sharing' and action=%s", (action,))
+            cur.execute("insert into public.activity(source,action,result,details) values('tuya-sharing',%s,'active',%s)", (action, encrypted))
+    else:
+        with _sqlite_conn() as conn:
+            conn.execute("delete from activity where source='tuya-sharing' and action=?", (action,))
+            conn.execute("insert into activity(created_at,source,action,result,details) values(?,'tuya-sharing',?,'active',?)", (_now(), action, encrypted))
+
+
 def _use_postgres() -> bool:
     return bool(DATABASE_URL)
 
@@ -614,14 +640,14 @@ def list_activity(limit: int = 50) -> list[dict[str, Any]]:
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config', 'lighting-config', 'tuya-cache') order by id desc limit %s",
+                "select * from public.activity where source not in ('cloud-auth', 'sms-config', 'email-bridge-config', 'google-voice-config', 'lighting-config', 'tuya-cache', 'tuya-sharing') order by id desc limit %s",
                 (limit,),
             )
             return [_normalize_row(r) for r in cur.fetchall()]
 
     with _sqlite_conn() as conn:
         rows = conn.execute(
-            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config', 'lighting-config', 'tuya-cache') ORDER BY id DESC LIMIT ?", (limit,)
+            "SELECT * FROM activity WHERE source NOT IN ('cloud-auth', 'sms-config', 'email-bridge-config', 'lighting-config', 'tuya-cache', 'tuya-sharing') ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
 

@@ -168,6 +168,11 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         result["reason"] = "sensor_offline"
         return result
 
+    if sensor.get('measurement_time_verified') is False:
+        result['action'] = 'skipped'
+        result['reason'] = 'sensor_measurement_time_unverified'
+        return result
+
     updated_at = sensor.get("updated_at")
     if updated_at:
         try:
@@ -448,7 +453,7 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 sensor_ready = False
                 try:
                     sensor = tuya.indoor_sensor(max_cache_age_seconds=20) if tuya.configured else None
-                    if sensor and sensor.get("ok") and sensor.get("online") is not False:
+                    if sensor and sensor.get("ok") and sensor.get("online") is not False and sensor.get('measurement_time_verified') is not False:
                         updated_at = sensor.get("updated_at")
                         if updated_at:
                             sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
