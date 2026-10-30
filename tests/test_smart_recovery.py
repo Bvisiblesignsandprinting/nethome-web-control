@@ -320,6 +320,87 @@ def test_without_history_current_reading_still_controls_normally(thermostat):
     assert result['projected_room_f'] is None
 
 
+def test_residual_heat_allowance_replays_74_degree_overshoot(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config['target_temperature_f'] = 74
+    config['temperature_history'] = [
+        dict(at=(now-timedelta(minutes=m)).isoformat(), room_f=v, phase='heat', calibration_f=0)
+        for m, v in [(5,71.9),(4,71.9),(3,71.9),(2,71.9),(1,72.8)]]
+    config['last_command_at'] = (now-timedelta(minutes=5)).isoformat()
+    sensor['temperature_f'] = 72.8
+    state.update(running=True, mode=4, fan_speed=40)
+    result = scheduler.run_smart_control(now)
+    assert result['projected_room_f'] < 74
+    assert result['residual_heat_allowance_f'] == 1.5
+    assert result['reason'] == 'anticipating_target'
+    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
+    assert config['target_temperature_f'] == 74
+
+
+@pytest.mark.parametrize('values', [(72.8,72.8,72.8), (73.4,73.1,72.8)])
+def test_residual_heat_needs_actual_warming(thermostat, values):
+    now, config, sensor, state, unit = thermostat
+    config['target_temperature_f'] = 74
+    config['temperature_history'] = [
+        dict(at=(now-timedelta(minutes=m)).isoformat(),room_f=v,phase='heat',calibration_f=0)
+        for m,v in zip((3,2,1),values)]
+    state.update(running=True,mode=4,fan_speed=40)
+    sensor['temperature_f'] = 72.8
+    result = scheduler.run_smart_control(now)
+    assert result['residual_heat_allowance_f'] == 0
+    assert result.get('reason') != 'anticipating_target'
+
+
+def test_unchanged_comfortable_room_can_rest_without_claiming_new_sample(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor.update(temperature_f=72.8, temperature_observed_at=(now-timedelta(hours=2)).isoformat())
+    result = scheduler.run_smart_control(now)
+    assert result['reason'] == 'stable_room' and result['action'] == 'hold'
+    unit.command.assert_not_called()
+    assert sensor_control_issue(sensor, now) == 'sensor_not_changing'
+    assert sensor_control_issue(sensor, now, config=config) is None
+    assert sensor['measurement_time_verified'] is False
+    # A changed target must not let that same old value start heating.
+    config['target_temperature_f'] = 74
+    assert scheduler.run_smart_control(now+timedelta(seconds=30))['reason'] == 'sensor_not_changing'
+    unit.command.assert_not_called()
+
+
+def test_unchanged_comfortable_room_still_stops_active_heating(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor.update(temperature_f=72, temperature_observed_at=(now-timedelta(hours=1)).isoformat())
+    state.update(running=True,mode=4)
+    assert scheduler.run_smart_control(now)['reason'] == 'stable_room'
+    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
+
+
+def test_early_cutoff_finishes_mixing_before_reheating(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config.update(target_temperature_f=74,last_coast_reason='anticipating_target',
+                  circulation_since=(now-timedelta(minutes=6)).isoformat(),
+                  last_command_at=(now-timedelta(minutes=6)).isoformat())
+    state.update(running=True,mode=5,fan_speed=40)
+    sensor['temperature_f'] = 72.8
+    assert scheduler.run_smart_control(now)['reason'] == 'anticipating_target'
+    unit.command.assert_not_called()
+    sensor['fetched_at'] = (now+timedelta(minutes=1)).isoformat()
+    result = scheduler.run_smart_control(now+timedelta(minutes=1))
+    assert result['action'] == 'off'
+    unit.command.assert_called_once_with({'action':'off'})
+
+
+@pytest.mark.parametrize('problem', ['offline','old_fetch','missing_observation'])
+def test_comfort_exception_never_hides_real_sensor_loss(thermostat, problem):
+    now, config, sensor, state, unit = thermostat
+    sensor.update(temperature_f=72,temperature_observed_at=(now-timedelta(hours=1)).isoformat())
+    if problem == 'offline': sensor['online'] = False
+    if problem == 'old_fetch': sensor['fetched_at'] = (now-timedelta(minutes=2)).isoformat()
+    if problem == 'missing_observation': sensor.pop('temperature_observed_at')
+    state.update(running=True,mode=4)
+    assert scheduler.run_smart_control(now)['reason'].startswith('sensor_')
+    unit.command.assert_called_once_with({'action':'off'})
+
+
 @pytest.mark.parametrize('fresh',[True,False])
 def test_weather_requires_recent_data_and_real_room_recovery(thermostat,fresh):
     now, config, sensor, state, unit=thermostat

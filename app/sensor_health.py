@@ -6,7 +6,7 @@ MAX_FETCH_AGE = 90
 MAX_UNCHANGED_AGE = 15 * 60
 
 
-def sensor_control_issue(sensor, now=None):
+def sensor_control_issue(sensor, now=None, *, config=None):
     now = now or datetime.now(timezone.utc)
     if not sensor or not sensor.get('ok'):
         return 'sensor_unavailable'
@@ -30,6 +30,15 @@ def sensor_control_issue(sensor, now=None):
         if fetched is None or not -5 <= fetched <= MAX_FETCH_AGE:
             return 'sensor_stale'
         if changed is None or not -5 <= changed < MAX_UNCHANGED_AGE:
+            # An unchanged value is not proof of sensor failure. A recent,
+            # online cloud snapshot can justify resting inside the comfort
+            # band, but must never justify starting conditioning outside it.
+            if changed is not None and changed >= 0 and config is not None:
+                room = value + float(config.get('sensor_calibration_f') or 0)
+                target = float(config.get('target_temperature_f') or 73)
+                band = max(.5, float(config.get('deadband_f') or 1))
+                if abs(room - target) <= band:
+                    return None
             return 'sensor_not_changing'
         return None
     if sensor.get('measurement_time_verified') is False:

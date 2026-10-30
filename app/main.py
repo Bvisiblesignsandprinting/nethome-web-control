@@ -671,7 +671,7 @@ def smart_control_status():
     except Exception:
         sensor_error = "Sensor unavailable"
 
-    issue = (sensor_control_issue(sensor) or evaluation_issue(config)) if config.get('enabled') else None
+    issue = (sensor_control_issue(sensor, config=config) or evaluation_issue(config)) if config.get('enabled') else None
     if config.get('enabled') and not settings.allow_writes:
         issue = 'writes_locked'
     panel_config = {
@@ -1103,4 +1103,3 @@ Welcome to NetHome AC Control. This private service sends HVAC status, weather-b
 <div class="box"><strong>Enrollment confirmation:</strong><br>
 NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.</div>
 </body></html>"""
-

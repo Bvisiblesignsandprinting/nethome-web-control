@@ -211,7 +211,7 @@ def _coast(config, state, result, now, reason):
         return result
     mixed = midea.command({'action':'set', 'mode':'fan', 'fan':'low', 'running':True})
     save_device_state(mixed, True, source='smart-control')
-    patch = {'last_command_at':now.isoformat(), 'circulation_since':now.isoformat()}
+    patch = {'last_command_at':now.isoformat(), 'circulation_since':now.isoformat(), 'last_coast_reason':reason}
     if mode in {2,4}:
         patch['last_conditioning_mode'] = {2:'cool',4:'heat'}[mode]
     save_smart_control_config(patch)
@@ -246,7 +246,8 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     # its timestamps to the time after I/O, not to the earlier cycle-start time.
     now_utc += timedelta(seconds=monotonic() - started)
     result['checked_at'] = now_utc.isoformat()
-    issue = sensor_control_issue(sensor, now_utc)
+    issue = sensor_control_issue(sensor, now_utc, config=config)
+    stable_snapshot = issue is None and sensor_control_issue(sensor, now_utc) == 'sensor_not_changing'
     if issue:
         return _sensor_pause(result, issue, now_utc)
 
@@ -281,6 +282,17 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     save_smart_control_config({'temperature_history':climate['history']})
     result.update({k:v for k,v in climate.items() if k != 'history'})
     projected = climate['projected_room_f']
+    # The last live cycle gained another 1.8F after heating stopped. Reserve
+    # a bounded 1.5F for residual warmth, only with a measured warming trend
+    # and within 2F of target. This is an allowance, not a physical forecast.
+    residual_allowance = 1.5 if current_mode == 4 and climate['moving_toward_target'] and abs_error_f <= 2 else 0
+    result['residual_heat_allowance_f'] = residual_allowance
+    if stable_snapshot:
+        result['stable_snapshot'] = True
+        if running:
+            return _coast(config, state, result, now_utc, 'stable_room')
+        result.update(action='hold', reason='stable_room')
+        return result
     effective_error = abs_error_f
     if climate['moving_toward_target'] and projected is not None:
         effective_error = min(abs_error_f, abs(target_f-projected))
@@ -306,9 +318,14 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     # Cut conditioning before overshoot when several observations show that
     # residual heat/cold is already carrying the room to its target.
-    approaching = running and ((current_mode == 4 and error_f > 0 and projected is not None and projected >= target_f)
+    approaching = running and ((current_mode == 4 and error_f > 0 and projected is not None and projected + residual_allowance >= target_f)
                               or (current_mode == 2 and error_f < 0 and projected is not None and projected <= target_f))
     if approaching and climate['moving_toward_target'] and abs_error_f <= 3:
+        return _coast(config, state, result, now_utc, 'anticipating_target')
+    # Give an early cutoff its full mixing period before deciding to reheat.
+    # Otherwise a rounded reading just below the band can restart the heater
+    # before the residual warmth has reached the room sensor.
+    if running and current_mode == 5 and config.get('last_coast_reason') == 'anticipating_target' and abs_error_f <= 3:
         return _coast(config, state, result, now_utc, 'anticipating_target')
     # Weather alone never proves that a room is recovering. Require measured
     # progress as well, and only coast near target rather than defer large errors.

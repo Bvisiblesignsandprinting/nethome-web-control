@@ -161,7 +161,7 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
     room = snap["room_temperature_f"]
     target = float(config.get("target_temperature_f") or 73.0)
     enabled = bool(config.get("enabled"))
-    issue = (sensor_control_issue(sensor) or evaluation_issue(config)) if enabled else None
+    issue = (sensor_control_issue(sensor, config=config) or evaluation_issue(config)) if enabled else None
     preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
     preferred = str(config.get("preferred_mode") or "auto").title()
     deadband = float(config.get("deadband_f") or 1.0)
