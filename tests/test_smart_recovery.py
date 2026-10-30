@@ -184,3 +184,37 @@ def test_failed_command_is_saved_as_failure_not_ready(thermostat):
     unit.command.side_effect = RuntimeError('unreachable')
     assert scheduler.run_smart_control(now)['reason'] == 'ac_unavailable'
     assert config['last_evaluation']['action'] == 'error'
+
+
+@pytest.mark.parametrize('delay', [6, 12, 24])
+def test_slow_successful_sensor_fetch_is_not_mistaken_for_future_data(thermostat, monkeypatch, delay):
+    now, config, sensor, state, unit = thermostat
+    sensor['fetched_at'] = (now + timedelta(seconds=delay)).isoformat()
+    sensor['temperature_observed_at'] = sensor['fetched_at']
+    ticks = iter([100.0, 100.0 + delay])
+    monkeypatch.setattr(scheduler, 'monotonic', lambda: next(ticks))
+    result = scheduler.run_smart_control(now)
+    assert result['action'] == 'adjusted'
+    assert result['midea_mode'] == 'heat'
+    assert result['checked_at'] == sensor['fetched_at']
+
+
+def test_fetch_delay_does_not_extend_the_stuck_temperature_deadline(thermostat, monkeypatch):
+    now, config, sensor, state, unit = thermostat
+    sensor['temperature_observed_at'] = (now - timedelta(seconds=895)).isoformat()
+    sensor['fetched_at'] = (now + timedelta(seconds=12)).isoformat()
+    state.update(running=True, mode=4)
+    ticks = iter([100.0, 112.0])
+    monkeypatch.setattr(scheduler, 'monotonic', lambda: next(ticks))
+    assert scheduler.run_smart_control(now)['reason'] == 'sensor_not_changing'
+    unit.command.assert_called_once_with({'action':'off'})
+
+
+def test_fresh_fetch_does_not_hide_the_controllers_last_sensor_stop(thermostat):
+    now, config, sensor, state, unit = thermostat
+    from app.sensor_health import evaluation_issue
+    config['last_evaluation'] = {'checked_at':now.isoformat(), 'action':'off', 'reason':'sensor_stale'}
+    assert sensor_control_issue(sensor, now) is None
+    assert evaluation_issue(config, now) == 'sensor_stale'
+    config['last_evaluation'] = {'checked_at':now.isoformat(), 'action':'hold', 'reason':'minimum_interval'}
+    assert evaluation_issue(config, now) is None

@@ -63,6 +63,10 @@ def evaluation_issue(config, now=None):
         return 'stop_failed'
     if last.get('reason') in {'ac_unavailable', 'writes_locked'}:
         return last['reason']
+    # A newer sensor fetch alone does not prove the controller has recovered.
+    # Keep the previous pause visible until a successful control evaluation.
+    if str(last.get('reason') or '').startswith('sensor_'):
+        return last['reason']
     try:
         stamp = datetime.fromisoformat(last['checked_at']).astimezone(timezone.utc)
         age = ((now or datetime.now(timezone.utc)) - stamp).total_seconds()

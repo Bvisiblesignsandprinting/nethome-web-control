@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta, timezone
+from time import monotonic
 import json
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -183,6 +184,7 @@ def _sensor_pause(result, reason, now):
 
 
 def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
+    started = monotonic()
     now_utc = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
     config = load_smart_control_config()
     result: dict[str, Any] = {
@@ -203,6 +205,10 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         add_activity("smart-control", "sensor", "error", str(exc)[:500])
         return _sensor_pause(result, 'sensor_unavailable', now_utc)
 
+    # The network response may arrive seconds AFTER the cycle began. Compare
+    # its timestamps to the time after I/O, not to the earlier cycle-start time.
+    now_utc += timedelta(seconds=monotonic() - started)
+    result['checked_at'] = now_utc.isoformat()
     issue = sensor_control_issue(sensor, now_utc)
     if issue:
         return _sensor_pause(result, issue, now_utc)
@@ -409,6 +415,7 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     return result
 
 def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
+    started = monotonic()
     now_utc = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
     schedules = list_schedules()
 
@@ -489,7 +496,8 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 sensor_ready = False
                 try:
                     sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if tuya.configured else None
-                    if sensor and sensor_control_issue(sensor, now_utc) is None:
+                    check_time = now_utc + timedelta(seconds=monotonic() - started)
+                    if sensor and sensor_control_issue(sensor, check_time) is None:
                         updated_at = sensor.get("updated_at")
                         if updated_at:
                             sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))
