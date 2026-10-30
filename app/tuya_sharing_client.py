@@ -181,7 +181,7 @@ def normalize(status, online, session):
             'humidity': round(humidity), 'battery': status.get('battery_state'),
             'online': online, 'source': 'tuya-sharing', 'updated_at': None,
             'measurement_time_verified': False, 'cached': False,
-            'fetched_at': datetime.now(timezone.utc).isoformat(), 'cache_ttl_seconds': INTERVAL}
+            'fetched_at': datetime.fromtimestamp(time.time(), timezone.utc).isoformat(), 'cache_ttl_seconds': INTERVAL}
 
 
 def indoor_sensor(max_cache_age_seconds=INTERVAL, *, force=False):
@@ -220,6 +220,14 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL, *, force=False):
             device = devices[0]
             status = {v['code']: v['value'] for v in device.get('status', []) if 'code' in v and 'value' in v}
             reading = normalize(status, device.get('online'), session)
+            # Keep observation evidence outside the replaceable reading, so a
+            # retry/reconnect cannot make a stuck temperature look new again.
+            evidence = cache.get('temperature_evidence') or {}
+            if evidence.get('value') != reading['temperature_c']:
+                evidence = {'value': reading['temperature_c'], 'observed_at': reading['fetched_at']}
+            reading['temperature_observed_at'] = evidence['observed_at']
+            reading['freshness_basis'] = 'bounded_cloud_observation'
+            cache['temperature_evidence'] = evidence
             reading['cache_ttl_seconds'] = interval
             cache.update(sensor=reading, fetched_at=time.time(), next_fetch_at=time.time() + interval, refresh_pending=False)
             save_sensor_cache(cache)

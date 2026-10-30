@@ -8,7 +8,7 @@
 <p id="status" role="status">Checking connection…</p>
 <p id="reading" hidden></p>
 <p>The sensor stays available all the time: every 30 seconds with Smart Room on, or every 20 minutes with Smart Room off. Use Refresh sensor on the dashboard for an immediate check. Connecting does not turn on Smart Room or change the heater.</p>
-<p>The connection returns the latest reported values. Automatic temperature control stays paused if the measurement time cannot be verified.</p>
+<p>The connection returns the latest reported values. Automatic control checks the connection every 30 seconds. It stops heating or cooling if the sensor becomes unavailable or the reported temperature stays unchanged for 15 minutes, and resumes when the temperature changes. A cloud refresh is not a new physical measurement.</p>
 </main><script>
 const el=id=>document.getElementById(id);
 async function request(path,body){const r=await fetch(path,{method:body?'POST':'GET',headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});const d=await r.json();if(!r.ok)throw Error(d.detail||'Connection unavailable');return d;}

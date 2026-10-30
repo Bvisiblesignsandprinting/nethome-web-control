@@ -54,7 +54,8 @@ from .models import (
     SmartControlUpdate,
     SmsConfigUpdate,
 )
-from .scheduler import run_due_schedules
+from .scheduler import run_due_schedules, run_smart_control
+from .sensor_health import sensor_control_issue, control_message, evaluation_issue
 from .schedule_profile_20260925 import apply_requested_smart_room_schedule
 from .tuya_client import TuyaCloudError, tuya
 from . import tuya_sharing_client as sharing
@@ -670,6 +671,9 @@ def smart_control_status():
     except Exception:
         sensor_error = "Sensor unavailable"
 
+    issue = (sensor_control_issue(sensor) or evaluation_issue(config)) if config.get('enabled') else None
+    if config.get('enabled') and not settings.allow_writes:
+        issue = 'writes_locked'
     panel_config = {
         "enabled": bool(config.get("enabled")),
         "target_temperature": float(config.get("target_temperature_f") or 73.0),
@@ -704,9 +708,13 @@ def smart_control_status():
             if sensor and sensor.get("ok") and sensor.get("temperature_f") is not None
             else None
         ),
+        "control_ready": bool(panel_config['enabled'] and not issue and settings.allow_writes),
+        "control_issue": issue,
+        "control_message": control_message(issue) if panel_config['enabled'] else 'Smart Room off',
+        "last_evaluation": config.get('last_evaluation'),
         "status": (
-            "monitoring" if panel_config["enabled"] and sensor and sensor.get("ok")
-            else "sensor unavailable" if panel_config["enabled"]
+            "monitoring" if panel_config["enabled"] and not issue
+            else "paused" if panel_config["enabled"]
             else "disabled"
         ),
         "sensor": sensor,
@@ -715,6 +723,12 @@ def smart_control_status():
         "sensor_refresh_seconds": 30 if panel_config["enabled"] else 1200,
         "sensor_error": sensor_error,
     }
+
+
+@app.post('/api/smart-control/run', dependencies=[Depends(access_auth)])
+def smart_control_run(request: Request):
+    sensor_setup_origin(request)
+    return run_smart_control()
 
 
 @app.post("/api/smart-control", dependencies=[Depends(access_auth)])

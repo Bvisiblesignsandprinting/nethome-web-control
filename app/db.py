@@ -15,6 +15,20 @@ _LOCAL_CLOUD_LOCK = threading.RLock()
 _CLOUD_LOCK_KEY = 151732606
 _SENSOR_LOCK_KEY = 151732607
 _LOCAL_SENSOR_LOCK = threading.RLock()
+_LOCAL_SMART_LOCK = threading.RLock()
+
+
+@contextmanager
+def smart_operation_lock():
+    """Serialize thermostat decisions; Midea has a separate transport lock."""
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("set local lock_timeout = '25s'")
+            cur.execute('select pg_advisory_xact_lock(%s)', (151732608,))
+            yield
+    else:
+        with _LOCAL_SMART_LOCK:
+            yield
 
 
 @contextmanager

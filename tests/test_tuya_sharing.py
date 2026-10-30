@@ -68,6 +68,28 @@ def test_off_mode_refreshes_only_every_twenty_minutes(setup, monkeypatch):
     assert len(calls)==2
 
 
+def test_successful_polls_and_humidity_changes_do_not_renew_temperature_evidence(setup, monkeypatch):
+    _, clock, _ = setup
+    first = sharing.indoor_sensor()
+    stamp = first['temperature_observed_at']
+    clock.now += 901
+    row = sharing.indoor_sensor()
+    assert row['temperature_observed_at'] == stamp
+    assert row['fetched_at'] != first['fetched_at']
+    def get(*a, **kw):
+        return {'success':True,'result':[{'id':'sensor','online':True,'status':[
+            {'code':'va_temperature','value':188},{'code':'va_humidity','value':50}]}]}
+    monkeypatch.setattr(sharing, '_manager', lambda *a,**kw:S(customer_api=S(get=get)))
+    clock.now += 30
+    assert sharing.indoor_sensor()['temperature_observed_at'] == stamp
+    def changed(*a, **kw):
+        return {'success':True,'result':[{'id':'sensor','online':True,'status':[
+            {'code':'va_temperature','value':189},{'code':'va_humidity','value':50}]}]}
+    monkeypatch.setattr(sharing, '_manager', lambda *a,**kw:S(customer_api=S(get=changed)))
+    clock.now += 30
+    assert sharing.indoor_sensor()['temperature_observed_at'] != stamp
+
+
 def test_manual_request_bypasses_idle_cache_but_deduplicates(setup,monkeypatch):
     _,clock,calls=setup
     monkeypatch.setattr(sharing,'load_smart_control_config',lambda:{'enabled':False})

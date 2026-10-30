@@ -21,6 +21,8 @@ from .db import (
 from .midea_client import midea
 from .tuya_client import TuyaCloudError, tuya
 from .weather import current_weather
+from .sensor_health import sensor_control_issue
+from .db import smart_operation_lock
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
@@ -141,6 +143,46 @@ def _outside_temperature(config: dict[str, Any], now_utc: datetime) -> tuple[flo
 
 
 def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
+    with smart_operation_lock():
+        now = now_utc or datetime.now(timezone.utc)
+        config = load_smart_control_config()
+        previous = config.get('last_evaluation') or {}
+        try:
+            age = (now - datetime.fromisoformat(previous['checked_at'])).total_seconds()
+        except (KeyError, ValueError, TypeError):
+            age = 999
+        # Cron and the panel may wake together; make just one decision per cycle.
+        if config.get('enabled') and 0 <= age < 25:
+            return previous
+        try:
+            result = _run_smart_control(now)
+        except Exception:
+            result = {'enabled': bool(config.get('enabled')), 'checked_at': now.isoformat(),
+                      'action': 'error', 'reason': 'ac_unavailable'}
+            add_activity('smart-control', 'controller', 'error', 'Automatic adjustment could not be confirmed')
+        if result.get('enabled'):
+            save_smart_control_config({'last_evaluation': result})
+        return result
+
+
+def _sensor_pause(result, reason, now):
+    """Do not leave a previously running heater/cooler unattended on sensor loss."""
+    result.update(action='skipped', reason=reason)
+    try:
+        state = midea.status()
+        if state.get('running') and int(state.get('mode') or 0) in {2, 4}:
+            stopped = midea.command({'action': 'off'})
+            save_device_state(stopped, True, source='smart-control')
+            save_smart_control_config({'last_command_at': now.isoformat(), 'comfort_since': None})
+            add_activity('smart-control', 'sensor_pause_off', 'success', reason)
+            result.update(action='off', verified=bool(stopped.get('verified')))
+    except Exception:
+        result['stop_failed'] = True
+        add_activity('smart-control', 'sensor_pause_off', 'error', 'Could not confirm AC stopped: ' + reason)
+    return result
+
+
+def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     now_utc = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
     config = load_smart_control_config()
     result: dict[str, Any] = {
@@ -159,30 +201,11 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         sensor = tuya.indoor_sensor(max_cache_age_seconds=30)
     except TuyaCloudError as exc:
         add_activity("smart-control", "sensor", "error", str(exc)[:500])
-        result["action"] = "skipped"
-        result["reason"] = "sensor_unavailable"
-        return result
+        return _sensor_pause(result, 'sensor_unavailable', now_utc)
 
-    if sensor.get("online") is False:
-        result["action"] = "skipped"
-        result["reason"] = "sensor_offline"
-        return result
-
-    if sensor.get('measurement_time_verified') is False:
-        result['action'] = 'skipped'
-        result['reason'] = 'sensor_measurement_time_unverified'
-        return result
-
-    updated_at = sensor.get("updated_at")
-    if updated_at:
-        try:
-            sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00")).astimezone(timezone.utc)
-            if now_utc - sensor_time > timedelta(minutes=10):
-                result["action"] = "skipped"
-                result["reason"] = "sensor_stale"
-                return result
-        except Exception:
-            pass
+    issue = sensor_control_issue(sensor, now_utc)
+    if issue:
+        return _sensor_pause(result, issue, now_utc)
 
     room_f = float(sensor["temperature_f"]) + float(config.get("sensor_calibration_f") or 0)
     target_f = float(config.get("target_temperature_f") or 73)
@@ -219,6 +242,17 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
             last_dt = datetime.fromisoformat(str(last_command_at).replace("Z", "+00:00")).astimezone(timezone.utc)
         except Exception:
             last_dt = None
+
+    # Stop heat on overshoot (or cooling on undershoot) immediately. The
+    # adjustment interval protects restarts/reversals, never delays stopping.
+    wrong_direction = running and ((current_mode == 4 and error_f <= 0) or (current_mode == 2 and error_f >= 0))
+    if wrong_direction:
+        stopped = midea.command({'action': 'off'})
+        save_device_state(stopped, True, source='smart-control')
+        save_smart_control_config({'last_command_at': now_utc.isoformat(), 'comfort_since': None})
+        add_activity('smart-control', 'target_stop', 'success', f'room={room_f:.1f} target={target_f:.1f}')
+        result.update(action='off', reason='target_reached', verified=bool(stopped.get('verified')))
+        return result
 
     # Comfort zone: wait for a stable reading before stepping down from
     # compressor operation to circulation or fully off.
@@ -332,7 +366,9 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     fan = _adaptive_fan(abs_error_f)
     correction_limit = 2.0 if abs_error_f >= 6.0 else 1.5 if abs_error_f >= 3.0 else 1.0
     correction = max(-correction_limit, min(correction_limit, error_f))
-    next_set_f = max(60.0, min(86.0, round((current_set_f + correction) * 2) / 2))
+    # Anchor to the room target, never integrate a correction into yesterday's
+    # setpoint. Otherwise heat can ratchet to 86F and carry that into cooling.
+    next_set_f = max(60.0, min(86.0, round((target_f + correction) * 2) / 2))
 
     command = {
         "action": "set",
@@ -453,7 +489,7 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
                 sensor_ready = False
                 try:
                     sensor = tuya.indoor_sensor(max_cache_age_seconds=30) if tuya.configured else None
-                    if sensor and sensor.get("ok") and sensor.get("online") is not False and sensor.get('measurement_time_verified') is not False:
+                    if sensor and sensor_control_issue(sensor, now_utc) is None:
                         updated_at = sensor.get("updated_at")
                         if updated_at:
                             sensor_time = datetime.fromisoformat(str(updated_at).replace("Z", "+00:00"))

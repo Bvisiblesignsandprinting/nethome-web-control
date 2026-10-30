@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import Mock
+from dataclasses import replace
 
 import pytest
 from app import main, scheduler, messaging
@@ -12,6 +13,7 @@ from app.tuya_client import TuyaCloudError
 def sensor_mode(monkeypatch):
     # Legacy project behavior remains gated; the new policy applies to account sharing.
     monkeypatch.setattr(main.sharing, 'configured', lambda: False)
+    monkeypatch.setattr(main, 'settings', replace(main.settings, allow_writes=True))
     config = {"enabled": False, "target_temperature_f": 73}
     sensor = {
         "ok": True, "temperature_f": 72.0, "humidity": 45,
@@ -49,7 +51,8 @@ def test_switching_on_resumes_reads_and_switching_off_stops_them(sensor_mode):
     config["enabled"] = True
     assert main.indoor_sensor()["temperature_f"] == 72.0
     status = main.smart_control_status()
-    assert status["status"] == "monitoring" and not status["sensor_paused"]
+    assert status["status"] == "paused" and not status["sensor_paused"]
+    assert status['control_issue'] == 'controller_not_checked'
     cloud.indoor_sensor.assert_called_with(max_cache_age_seconds=30)
     assert messaging._smart_snapshot()["sensor"]["temperature_f"] == 72.0
     cloud.indoor_sensor.reset_mock()
