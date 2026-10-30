@@ -191,7 +191,7 @@ def test_slow_successful_sensor_fetch_is_not_mistaken_for_future_data(thermostat
     now, config, sensor, state, unit = thermostat
     sensor['fetched_at'] = (now + timedelta(seconds=delay)).isoformat()
     sensor['temperature_observed_at'] = sensor['fetched_at']
-    ticks = iter([100.0, 100.0 + delay])
+    ticks = iter([100.0, 100.0, 100.0, 100.0 + delay])
     monkeypatch.setattr(scheduler, 'monotonic', lambda: next(ticks))
     result = scheduler.run_smart_control(now)
     assert result['action'] == 'adjusted'
@@ -204,7 +204,7 @@ def test_fetch_delay_does_not_extend_the_stuck_temperature_deadline(thermostat, 
     sensor['temperature_observed_at'] = (now - timedelta(seconds=895)).isoformat()
     sensor['fetched_at'] = (now + timedelta(seconds=12)).isoformat()
     state.update(running=True, mode=4)
-    ticks = iter([100.0, 112.0])
+    ticks = iter([100.0, 100.0, 100.0, 112.0])
     monkeypatch.setattr(scheduler, 'monotonic', lambda: next(ticks))
     assert scheduler.run_smart_control(now)['reason'] == 'sensor_not_changing'
     unit.command.assert_called_once_with({'action':'off'})
@@ -218,3 +218,15 @@ def test_fresh_fetch_does_not_hide_the_controllers_last_sensor_stop(thermostat):
     assert evaluation_issue(config, now) == 'sensor_stale'
     config['last_evaluation'] = {'checked_at':now.isoformat(), 'action':'hold', 'reason':'minimum_interval'}
     assert evaluation_issue(config, now) is None
+
+
+def test_lock_and_config_delay_is_counted_before_sensor_io(thermostat, monkeypatch):
+    now, config, sensor, state, unit = thermostat
+    sensor['fetched_at'] = (now + timedelta(seconds=20)).isoformat()
+    sensor['temperature_observed_at'] = sensor['fetched_at']
+    # 8 seconds before the inner decision, then 12 seconds reading the sensor.
+    ticks = iter([100.0, 108.0, 108.0, 120.0])
+    monkeypatch.setattr(scheduler, 'monotonic', lambda: next(ticks))
+    result = scheduler.run_smart_control(now)
+    assert result['action'] == 'adjusted'
+    assert result['checked_at'] == sensor['fetched_at']

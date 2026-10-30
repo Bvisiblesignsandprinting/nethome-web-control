@@ -144,8 +144,9 @@ def _outside_temperature(config: dict[str, Any], now_utc: datetime) -> tuple[flo
 
 
 def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
+    started = monotonic()
+    now = now_utc or datetime.now(timezone.utc)
     with smart_operation_lock():
-        now = now_utc or datetime.now(timezone.utc)
         config = load_smart_control_config()
         previous = config.get('last_evaluation') or {}
         try:
@@ -156,7 +157,7 @@ def run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         if config.get('enabled') and 0 <= age < 25:
             return previous
         try:
-            result = _run_smart_control(now)
+            result = _run_smart_control(now + timedelta(seconds=monotonic() - started))
         except Exception:
             result = {'enabled': bool(config.get('enabled')), 'checked_at': now.isoformat(),
                       'action': 'error', 'reason': 'ac_unavailable'}
@@ -669,5 +670,5 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             summary['sensor_monitor'] = tuya.indoor_sensor()
         except TuyaCloudError:
             summary['sensor_monitor'] = {'ok': False, 'error': 'Sensor refresh unavailable'}
-    summary["smart_control"] = run_smart_control(now_utc)
+    summary["smart_control"] = run_smart_control(now_utc + timedelta(seconds=monotonic() - started))
     return summary
