@@ -155,3 +155,32 @@ def test_controller_outage_does_not_claim_ready(thermostat, monkeypatch):
     assert evaluation_issue(config, now) == 'controller_overdue'
     config['last_evaluation'] = {'checked_at': now.isoformat(), 'stop_failed':True}
     assert evaluation_issue(config, now) == 'stop_failed'
+
+
+def test_heat_to_cool_waits_after_stop_before_restarting(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor['temperature_f'] = 87.2
+    state.update(running=True, mode=4)
+    assert scheduler.run_smart_control(now)['action'] == 'off'
+    state['running'] = False
+    sensor['fetched_at'] = (now+timedelta(minutes=1)).isoformat()
+    result = scheduler.run_smart_control(now+timedelta(minutes=1))
+    assert result['reason'] == 'minimum_interval'
+    unit.command.assert_called_once()
+    sensor['fetched_at'] = (now+timedelta(minutes=6)).isoformat()
+    assert scheduler.run_smart_control(now+timedelta(minutes=6))['midea_mode'] == 'cool'
+
+
+def test_sensor_loss_also_stops_units_left_in_auto_mode(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor['online'] = False
+    state.update(running=True, mode=1)
+    assert scheduler.run_smart_control(now)['action'] == 'off'
+    unit.command.assert_called_once_with({'action':'off'})
+
+
+def test_failed_command_is_saved_as_failure_not_ready(thermostat):
+    now, config, sensor, state, unit = thermostat
+    unit.command.side_effect = RuntimeError('unreachable')
+    assert scheduler.run_smart_control(now)['reason'] == 'ac_unavailable'
+    assert config['last_evaluation']['action'] == 'error'

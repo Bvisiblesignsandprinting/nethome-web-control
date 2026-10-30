@@ -170,7 +170,7 @@ def _sensor_pause(result, reason, now):
     result.update(action='skipped', reason=reason)
     try:
         state = midea.status()
-        if state.get('running') and int(state.get('mode') or 0) in {2, 4}:
+        if state.get('running') and int(state.get('mode') or 0) in {1, 2, 3, 4}:
             stopped = midea.command({'action': 'off'})
             save_device_state(stopped, True, source='smart-control')
             save_smart_control_config({'last_command_at': now.isoformat(), 'comfort_since': None})
