@@ -106,9 +106,9 @@ def _command_from_schedule(schedule: dict[str, Any]) -> dict[str, Any]:
 
 
 def _adaptive_fan(abs_error_f: float) -> str:
-    if abs_error_f >= 6.0:
+    if abs_error_f >= 12.0:
         return "high"
-    if abs_error_f >= 3.0:
+    if abs_error_f >= 6.0:
         return "medium"
     return "low"
 
@@ -184,6 +184,41 @@ def _sensor_pause(result, reason, now):
     return result
 
 
+def _coast(config, state, result, now, reason):
+    """Mix room air on low fan for at most seven minutes, then rest."""
+    since = config.get('circulation_since')
+    try:
+        expired = since and (now - datetime.fromisoformat(since)).total_seconds() >= 420
+    except (TypeError, ValueError):
+        expired = False
+    mode = int(state.get('mode') or 0)
+    running = bool(state.get('running'))
+    if expired and (not running or mode == 5):
+        if running:
+            stopped = midea.command({'action':'off'})
+            save_device_state(stopped, True, source='smart-control')
+            save_smart_control_config({'last_command_at':now.isoformat()})
+            add_activity('smart-control', 'coast_off', 'success', reason)
+            result.update(action='off', reason=reason, verified=bool(stopped.get('verified')))
+        else:
+            result.update(action='hold', reason=reason)
+        return result
+    if running and mode == 5 and int(state.get('fan_speed') or 0) <= 40:
+        if not since:
+            save_smart_control_config({'circulation_since':now.isoformat()})
+        result.update(action='hold', reason=reason)
+        return result
+    mixed = midea.command({'action':'set', 'mode':'fan', 'fan':'low', 'running':True})
+    save_device_state(mixed, True, source='smart-control')
+    patch = {'last_command_at':now.isoformat(), 'circulation_since':now.isoformat()}
+    if mode in {2,4}:
+        patch['last_conditioning_mode'] = {2:'cool',4:'heat'}[mode]
+    save_smart_control_config(patch)
+    add_activity('smart-control', 'circulate', 'success', reason)
+    result.update(action='circulate', reason=reason, midea_mode='fan', fan='low', verified=bool(mixed.get('verified')))
+    return result
+
+
 def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     started = monotonic()
     now_utc = (now_utc or datetime.now(timezone.utc)).astimezone(timezone.utc)
@@ -253,79 +288,40 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     # Stop heat on overshoot (or cooling on undershoot) immediately. The
     # adjustment interval protects restarts/reversals, never delays stopping.
     wrong_direction = running and ((current_mode == 4 and error_f <= 0) or (current_mode == 2 and error_f >= 0))
-    if wrong_direction:
+    if wrong_direction and abs_error_f >= 3.0:
         stopped = midea.command({'action': 'off'})
         save_device_state(stopped, True, source='smart-control')
-        save_smart_control_config({'last_command_at': now_utc.isoformat(), 'comfort_since': None})
+        save_smart_control_config({'last_command_at': now_utc.isoformat(), 'comfort_since': None, 'last_conditioning_mode': {2:'cool',4:'heat'}.get(current_mode)})
         add_activity('smart-control', 'target_stop', 'success', f'room={room_f:.1f} target={target_f:.1f}')
         result.update(action='off', reason='target_reached', verified=bool(stopped.get('verified')))
         return result
 
-    # Comfort zone: wait for a stable reading before stepping down from
-    # compressor operation to circulation or fully off.
-    if abs_error_f <= deadband_f:
-        comfort_since = config.get("comfort_since")
-        if not comfort_since:
-            saved = save_smart_control_config({"comfort_since": now_utc.isoformat()})
-            result["action"] = "hold"
-            result["reason"] = "comfort_stabilizing"
-            result["comfort_since"] = saved.get("comfort_since")
-            return result
+    # Stop active conditioning on entering the comfort band, then circulate
+    # quietly. Do not keep adding heat/cold for a three-minute settling wait.
+    if abs_error_f <= deadband_f or (wrong_direction and abs_error_f < 3.0):
+        save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
+        return _coast(config, state, result, now_utc, 'comfort_circulation')
 
+    candidate = 'heat' if error_f > 0 else 'cool'
+    previous_mode = config.get('last_conditioning_mode') or {2:'cool',4:'heat'}.get(current_mode)
+    if preferred_mode == 'auto' and previous_mode and candidate != previous_mode and abs_error_f < 6.0:
+        # Small overshoots get air mixing and time to settle, not an immediate
+        # heat/cool reversal. A 3-6F opposite demand must persist ten minutes.
+        since = config.get('opposite_demand_since')
+        if abs_error_f < 3.0:
+            save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
+            return _coast(config, state, result, now_utc, 'settling_before_reversal')
+        if config.get('opposite_demand_mode') != candidate or not since:
+            save_smart_control_config({'opposite_demand_since': now_utc.isoformat(), 'opposite_demand_mode': candidate})
+            return _coast(config, state, result, now_utc, 'confirming_opposite_demand')
         try:
-            comfort_dt = datetime.fromisoformat(str(comfort_since).replace("Z", "+00:00")).astimezone(timezone.utc)
-        except Exception:
-            comfort_dt = now_utc
-
-        stable_minutes = (now_utc - comfort_dt).total_seconds() / 60.0
-        result["comfort_stable_minutes"] = round(stable_minutes, 1)
-        mild_outside = _outside_is_mild(outside_f, target_f)
-
-        if stable_minutes < 3.0:
-            result["action"] = "hold"
-            result["reason"] = "comfort_stabilizing"
-            return result
-
-        # If conditions are mild, use a short low-fan circulation stage before
-        # shutting down. Fan mode recirculates room air; it does not introduce
-        # outside air.
-        if mild_outside and current_mode != 5:
-            command = {"action": "set", "mode": "fan", "fan": "low", "running": True}
-            command_result = midea.command(command)
-            save_device_state(command_result, True, source="smart-control")
-            saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
-            add_activity("smart-control", "circulate", "success", f"room={room_f:.1f} target={target_f:.1f} outside={outside_f}")
-            result.update({
-                "action": "circulate",
-                "midea_mode": "fan",
-                "fan": "low",
-                "verified": bool(command_result.get("verified")),
-                "last_command_at": saved.get("last_command_at"),
-            })
-            return result
-
-        if mild_outside and current_mode == 5 and running:
-            if last_dt and now_utc - last_dt < timedelta(minutes=7):
-                result["action"] = "hold"
-                result["reason"] = "circulation_period"
-                return result
-
-        if running:
-            command_result = midea.command({"action": "off"})
-            save_device_state(command_result, True, source="smart-control")
-            saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
-            add_activity("smart-control", "comfort_off", "success", f"room={room_f:.1f} target={target_f:.1f}")
-            result.update({
-                "action": "off",
-                "reason": "comfort_stable",
-                "verified": bool(command_result.get("verified")),
-                "last_command_at": saved.get("last_command_at"),
-            })
-            return result
-
-        result["action"] = "hold"
-        result["reason"] = "comfort_stable"
-        return result
+            confirmed = (now_utc - datetime.fromisoformat(since)).total_seconds() >= 600
+        except (ValueError, TypeError):
+            confirmed = False
+        if not confirmed:
+            return _coast(config, state, result, now_utc, 'confirming_opposite_demand')
+    elif config.get('opposite_demand_since'):
+        save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
 
     if config.get("comfort_since") is not None:
         config = save_smart_control_config({"comfort_since": None})
@@ -371,7 +367,7 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     # Strong unit: use the fan for most of the response shaping and taper both
     # airflow and setpoint correction as the room approaches target.
     fan = _adaptive_fan(abs_error_f)
-    correction_limit = 2.0 if abs_error_f >= 6.0 else 1.5 if abs_error_f >= 3.0 else 1.0
+    correction_limit = 2.0 if abs_error_f >= 12.0 else 1.5 if abs_error_f >= 6.0 else 1.0
     correction = max(-correction_limit, min(correction_limit, error_f))
     # Anchor to the room target, never integrate a correction into yesterday's
     # setpoint. Otherwise heat can ratchet to 86F and carry that into cooling.
@@ -398,7 +394,7 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     command_result = midea.command(command)
     save_device_state(command_result, True, source="smart-control")
-    saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
+    saved = save_smart_control_config({"last_command_at": now_utc.isoformat(), "last_conditioning_mode": desired_mode, "circulation_since": None, "opposite_demand_since": None, "opposite_demand_mode": None})
     add_activity(
         "smart-control",
         "adjust",

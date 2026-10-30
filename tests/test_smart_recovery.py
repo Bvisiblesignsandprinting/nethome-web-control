@@ -67,15 +67,15 @@ def test_hot_room_starts_cooling_after_restart_interval(thermostat):
 def test_heat_setpoint_does_not_ratchet_up_each_cycle(thermostat):
     now, config, sensor, state, unit = thermostat
     state['target_temperature_c'] = 30
-    assert scheduler.run_smart_control(now)['midea_setpoint_f'] == 74
+    assert scheduler.run_smart_control(now)['midea_setpoint_f'] == 73.5
 
 
 def test_cooling_stops_at_target_immediately(thermostat):
     now, config, sensor, state, unit = thermostat
     sensor['temperature_f'] = 72
     state.update(running=True, mode=2)
-    assert scheduler.run_smart_control(now)['reason'] == 'target_reached'
-    unit.command.assert_called_once_with({'action': 'off'})
+    assert scheduler.run_smart_control(now)['reason'] == 'comfort_circulation'
+    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
 
 
 @pytest.mark.parametrize('issue', ['offline', 'fetch_old', 'frozen', 'missing_observation', 'nan', 'failure'])
@@ -230,3 +230,59 @@ def test_lock_and_config_delay_is_counted_before_sensor_io(thermostat, monkeypat
     result = scheduler.run_smart_control(now)
     assert result['action'] == 'adjusted'
     assert result['checked_at'] == sensor['fetched_at']
+
+
+@pytest.mark.parametrize('mode,room', [(4,71.2),(2,72.8)])
+def test_entering_comfort_band_uses_low_fan_without_waiting(thermostat,mode,room):
+    now, config, sensor, state, unit = thermostat
+    state.update(running=True,mode=mode,fan_speed=60)
+    sensor['temperature_f']=room
+    config['last_command_at']=(now-timedelta(seconds=10)).isoformat()
+    assert scheduler.run_smart_control(now)['action']=='circulate'
+    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
+
+
+def test_small_heat_overshoot_coasts_without_cooling(thermostat):
+    now, config, sensor, state, unit = thermostat
+    state.update(running=False,mode=4)
+    sensor['temperature_f']=74.7
+    result=scheduler.run_smart_control(now)
+    assert result['reason']=='settling_before_reversal'
+    assert result['midea_mode']=='fan'
+
+
+def test_opposite_demand_must_persist_ten_minutes(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor['temperature_f']=76
+    state.update(running=False,mode=4)
+    assert scheduler.run_smart_control(now)['reason']=='confirming_opposite_demand'
+    state.update(running=True,mode=5,fan_speed=40)
+    for minute in (1,6):
+        sensor['fetched_at']=(now+timedelta(minutes=minute)).isoformat()
+        assert scheduler.run_smart_control(now+timedelta(minutes=minute))['reason']=='confirming_opposite_demand'
+    sensor['fetched_at']=(now+timedelta(minutes=10)).isoformat()
+    assert scheduler.run_smart_control(now+timedelta(minutes=10))['midea_mode']=='cool'
+
+
+def test_brief_overshoot_resets_reversal_confirmation(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config.update(last_conditioning_mode='heat',opposite_demand_mode='cool',
+                  opposite_demand_since=(now-timedelta(minutes=8)).isoformat())
+    state.update(running=True,mode=5,fan_speed=40)
+    sensor['temperature_f']=74
+    assert scheduler.run_smart_control(now)['reason']=='settling_before_reversal'
+    assert config['opposite_demand_since'] is None
+    unit.command.assert_not_called()
+
+
+def test_fan_circulation_rests_after_seven_minutes(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor['temperature_f']=72
+    state.update(running=True,mode=5,fan_speed=40)
+    config['circulation_since']=(now-timedelta(minutes=7)).isoformat()
+    assert scheduler.run_smart_control(now)['action']=='off'
+    unit.command.assert_called_once_with({'action':'off'})
+    state['running']=False
+    sensor['fetched_at']=(now+timedelta(minutes=1)).isoformat()
+    assert scheduler.run_smart_control(now+timedelta(minutes=1))['action']=='hold'
+    unit.command.assert_called_once()

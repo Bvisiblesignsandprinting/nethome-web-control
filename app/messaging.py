@@ -198,13 +198,16 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
     if explain and enabled and room is not None and not issue:
         error = round(target - float(room), 1)
         distance = abs(error)
-        if distance <= deadband:
-            reason = "Room is inside the comfort band; Smart Room is stabilizing/holding."
+        recent = config.get('last_evaluation') or {}
+        if recent.get('reason') in {'comfort_circulation','settling_before_reversal','confirming_opposite_demand'}:
+            reason = "Smart Room is letting the room settle, using low fan circulation before deciding whether more heating or cooling is needed."
+        elif distance <= deadband:
+            reason = "Room is inside the comfort band; Smart Room is circulating gently or resting."
         else:
             direction = "heating" if error > 0 else "cooling"
-            if distance < 3:
+            if distance < 6:
                 fan = "Low"
-            elif distance < 6:
+            elif distance < 12:
                 fan = "Medium"
             else:
                 fan = "High"
