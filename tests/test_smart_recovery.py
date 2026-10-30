@@ -297,3 +297,40 @@ def test_airflow_tapers_without_waiting_for_compressor_interval(thermostat):
     assert scheduler.run_smart_control(now)['action']=='fan_taper'
     unit.command.assert_called_once_with({'action':'set','fan':'low'})
     assert config['last_command_at']==original
+
+
+def test_temperature_history_cuts_heat_before_projected_overshoot(thermostat):
+    def sample(t, m, v):
+        return {'at':(t-timedelta(minutes=m)).isoformat(),'room_f':v,'phase':'heat','calibration_f':0}
+    now, config, sensor, state, unit = thermostat
+    config['temperature_history']=[sample(now,3,68),sample(now,2,68.8),sample(now,1,69.6)]
+    state.update(running=True,mode=4,fan_speed=40)
+    sensor['temperature_f']=70.4
+    result=scheduler.run_smart_control(now)
+    assert result['reason']=='anticipating_target'
+    assert result['midea_mode']=='fan'
+    assert result['room_trend_f_per_minute']==.8
+
+
+def test_without_history_current_reading_still_controls_normally(thermostat):
+    now, config, sensor, state, unit = thermostat
+    result=scheduler.run_smart_control(now)
+    assert result['action']=='adjusted'
+    assert result['room_trend_f_per_minute'] is None
+    assert result['projected_room_f'] is None
+
+
+@pytest.mark.parametrize('fresh',[True,False])
+def test_weather_requires_recent_data_and_real_room_recovery(thermostat,fresh):
+    now, config, sensor, state, unit=thermostat
+    config['outside_checked_at']=(now-timedelta(minutes=0 if fresh else 31)).isoformat()
+    config['temperature_history']=[{'at':(now-timedelta(minutes=m)).isoformat(),'room_f':v,'phase':'fan','calibration_f':0}
+                                   for m,v in [(3,74.8),(2,74.6),(1,74.4)]]
+    sensor['temperature_f']=74.2
+    state.update(running=True,mode=5,fan_speed=40)
+    result=scheduler.run_smart_control(now)
+    if fresh:
+        assert result['reason']=='weather_assisted_settling'
+        unit.command.assert_not_called()
+    else:
+        assert result['action']=='adjusted' and result['midea_mode']=='cool'

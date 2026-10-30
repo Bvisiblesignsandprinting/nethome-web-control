@@ -23,6 +23,7 @@ from .midea_client import midea
 from .tuya_client import TuyaCloudError, tuya
 from .weather import current_weather
 from .sensor_health import sensor_control_issue
+from .climate_history import observe_climate
 from .db import smart_operation_lock
 
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
@@ -276,6 +277,13 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     current_mode = int(state.get("mode") or 0)
     running = bool(state.get("running"))
+    climate = observe_climate(config, room_f, outside_f, state, now_utc)
+    save_smart_control_config({'temperature_history':climate['history']})
+    result.update({k:v for k,v in climate.items() if k != 'history'})
+    projected = climate['projected_room_f']
+    effective_error = abs_error_f
+    if climate['moving_toward_target'] and projected is not None:
+        effective_error = min(abs_error_f, abs(target_f-projected))
     last_command_at = config.get("last_command_at")
     min_minutes = max(1, int(config.get("min_command_interval_minutes") or 5))
     last_dt = None
@@ -295,6 +303,17 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         add_activity('smart-control', 'target_stop', 'success', f'room={room_f:.1f} target={target_f:.1f}')
         result.update(action='off', reason='target_reached', verified=bool(stopped.get('verified')))
         return result
+
+    # Cut conditioning before overshoot when several observations show that
+    # residual heat/cold is already carrying the room to its target.
+    approaching = running and ((current_mode == 4 and error_f > 0 and projected is not None and projected >= target_f)
+                              or (current_mode == 2 and error_f < 0 and projected is not None and projected <= target_f))
+    if approaching and climate['moving_toward_target'] and abs_error_f <= 3:
+        return _coast(config, state, result, now_utc, 'anticipating_target')
+    # Weather alone never proves that a room is recovering. Require measured
+    # progress as well, and only coast near target rather than defer large errors.
+    if not (running and current_mode in {2,4}) and climate['outside_helpful'] and climate['moving_toward_target'] and abs_error_f <= 3:
+        return _coast(config, state, result, now_utc, 'weather_assisted_settling')
 
     # Stop active conditioning on entering the comfort band, then circulate
     # quietly. Do not keep adding heat/cold for a three-minute settling wait.
@@ -329,7 +348,7 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     if last_dt and now_utc - last_dt < timedelta(minutes=min_minutes):
         # Taper airflow promptly even while a setpoint/restart change is held.
         # This only lowers the fan; it does not restart or reverse conditioning.
-        softer_fan = _adaptive_fan(abs_error_f)
+        softer_fan = _adaptive_fan(effective_error)
         softer_speed = {'low':40, 'medium':60, 'high':100}[softer_fan]
         if running and current_mode in {2,4} and int(state.get('fan_speed') or 0) > softer_speed:
             tapered = midea.command({'action':'set', 'fan':softer_fan})
@@ -376,8 +395,8 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     # Strong unit: use the fan for most of the response shaping and taper both
     # airflow and setpoint correction as the room approaches target.
-    fan = _adaptive_fan(abs_error_f)
-    correction_limit = 2.0 if abs_error_f >= 12.0 else 1.5 if abs_error_f >= 6.0 else 1.0
+    fan = _adaptive_fan(effective_error)
+    correction_limit = 2.0 if effective_error >= 12.0 else 1.5 if effective_error >= 6.0 else 1.0
     correction = max(-correction_limit, min(correction_limit, error_f))
     # Anchor to the room target, never integrate a correction into yesterday's
     # setpoint. Otherwise heat can ratchet to 86F and carry that into cooling.

@@ -199,7 +199,7 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
         error = round(target - float(room), 1)
         distance = abs(error)
         recent = config.get('last_evaluation') or {}
-        if recent.get('reason') in {'comfort_circulation','settling_before_reversal','confirming_opposite_demand'}:
+        if recent.get('reason') in {'comfort_circulation','settling_before_reversal','confirming_opposite_demand','anticipating_target','weather_assisted_settling'}:
             reason = "Smart Room is letting the room settle, using low fan circulation before deciding whether more heating or cooling is needed."
         elif distance <= deadband:
             reason = "Room is inside the comfort band; Smart Room is circulating gently or resting."
@@ -213,6 +213,10 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
                 fan = "High"
             reason = f"Room is {distance:g}°F {'below' if error > 0 else 'above'} target; Smart Room is {direction} with {fan} correction."
         lines.extend(["", "Why:", reason])
+        if recent.get('room_trend_f_per_minute') is not None:
+            lines.append(f"Recent room trend: {recent['room_trend_f_per_minute']:+.2f}°F/min")
+        if recent.get('projected_room_f') is not None:
+            lines.append(f"Estimated in {recent.get('projection_minutes',3)} min: {recent['projected_room_f']:g}°F")
 
     return "\n".join(lines)
 
