@@ -286,3 +286,14 @@ def test_fan_circulation_rests_after_seven_minutes(thermostat):
     sensor['fetched_at']=(now+timedelta(minutes=1)).isoformat()
     assert scheduler.run_smart_control(now+timedelta(minutes=1))['action']=='hold'
     unit.command.assert_called_once()
+
+
+def test_airflow_tapers_without_waiting_for_compressor_interval(thermostat):
+    now, config, sensor, state, unit = thermostat
+    sensor['temperature_f']=69
+    state.update(running=True,mode=4,fan_speed=60)
+    original=(now-timedelta(minutes=1)).isoformat()
+    config['last_command_at']=original
+    assert scheduler.run_smart_control(now)['action']=='fan_taper'
+    unit.command.assert_called_once_with({'action':'set','fan':'low'})
+    assert config['last_command_at']==original

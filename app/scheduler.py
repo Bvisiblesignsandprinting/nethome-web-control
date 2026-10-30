@@ -327,6 +327,16 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         config = save_smart_control_config({"comfort_since": None})
 
     if last_dt and now_utc - last_dt < timedelta(minutes=min_minutes):
+        # Taper airflow promptly even while a setpoint/restart change is held.
+        # This only lowers the fan; it does not restart or reverse conditioning.
+        softer_fan = _adaptive_fan(abs_error_f)
+        softer_speed = {'low':40, 'medium':60, 'high':100}[softer_fan]
+        if running and current_mode in {2,4} and int(state.get('fan_speed') or 0) > softer_speed:
+            tapered = midea.command({'action':'set', 'fan':softer_fan})
+            save_device_state(tapered, True, source='smart-control')
+            add_activity('smart-control', 'fan_taper', 'success', f'room={room_f:.1f} target={target_f:.1f} fan={softer_fan}')
+            result.update(action='fan_taper', fan=softer_fan, verified=bool(tapered.get('verified')))
+            return result
         result["action"] = "hold"
         result["reason"] = "minimum_interval"
         return result
