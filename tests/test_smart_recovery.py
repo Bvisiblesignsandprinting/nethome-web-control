@@ -45,6 +45,60 @@ def test_recent_cloud_snapshot_can_heat_without_fabricating_measurement_time(the
     assert sensor['updated_at'] is None and not sensor['measurement_time_verified']
 
 
+@pytest.mark.parametrize('saved_mode,room,old_mode,needed', [('heat',78,4,'cool'),('cool',72,2,'heat')])
+def test_smart_auto_overrides_old_direction_preferences_gently(thermostat,saved_mode,room,old_mode,needed):
+    now, config, sensor, state, unit = thermostat
+    config.update(target_temperature_f=75,preferred_mode=saved_mode,
+                  last_conditioning_mode={4:'heat',2:'cool'}[old_mode],
+                  opposite_demand_mode=needed,opposite_demand_since=(now-timedelta(minutes=11)).isoformat(),
+                  last_command_at=(now-timedelta(minutes=12)).isoformat())
+    sensor['temperature_f']=room
+    state.update(running=False,mode=old_mode)
+    result=scheduler.run_smart_control(now)
+    assert result['action']=='adjusted' and result['midea_mode']==needed
+    assert result['preferred_mode']=='auto'
+    assert unit.command.call_args.args[0]['fan']=='low'
+    assert abs(unit.command.call_args.args[0]['temperature']-75)<=1
+
+
+def test_78_to_75_cooling_still_respects_restart_guard(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config.update(target_temperature_f=75,preferred_mode='heat',last_conditioning_mode='heat',
+                  opposite_demand_mode='cool',opposite_demand_since=(now-timedelta(minutes=11)).isoformat(),
+                  last_command_at=(now-timedelta(minutes=2)).isoformat())
+    sensor['temperature_f']=78
+    state.update(running=False,mode=5)
+    assert scheduler.run_smart_control(now)['reason']=='minimum_interval'
+    unit.command.assert_not_called()
+
+
+def test_persistent_small_opposite_error_eventually_cools_after_quiet_settling(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config.update(target_temperature_f=75,preferred_mode='heat',last_conditioning_mode='heat')
+    sensor['temperature_f']=77.2
+    state.update(running=False,mode=5)
+    assert scheduler.run_smart_control(now)['reason']=='settling_before_reversal'
+    assert unit.command.call_args.args[0]=={'action':'set','mode':'fan','fan':'low','running':True}
+    state.update(running=True,mode=5,fan_speed=40)
+    sensor['fetched_at']=(now+timedelta(minutes=8)).isoformat()
+    assert scheduler.run_smart_control(now+timedelta(minutes=8))['action']=='off'
+    state['running']=False
+    # New changed-temperature evidence, not merely another fetch of the old value.
+    sensor.update(temperature_f=77.1,fetched_at=(now+timedelta(minutes=16)).isoformat(),
+                  temperature_observed_at=(now+timedelta(minutes=16)).isoformat())
+    result=scheduler.run_smart_control(now+timedelta(minutes=16))
+    assert result['midea_mode']=='cool' and result['fan']=='low'
+
+
+def test_unbounded_wait_fix_does_not_override_unchanged_sensor_safety(thermostat):
+    now, config, sensor, state, unit = thermostat
+    config.update(target_temperature_f=75,preferred_mode='heat',last_conditioning_mode='heat',
+                  opposite_demand_mode='cool',opposite_demand_since=(now-timedelta(minutes=16)).isoformat())
+    sensor.update(temperature_f=77,fetched_at=now.isoformat(),temperature_observed_at=(now-timedelta(minutes=16)).isoformat())
+    assert scheduler.run_smart_control(now)['reason']=='sensor_not_changing'
+    unit.command.assert_not_called()
+
+
 def test_screenshot_overheat_stops_heat_before_six_minute_wait(thermostat):
     now, config, sensor, state, unit = thermostat
     sensor['temperature_f'] = 87.2
@@ -264,13 +318,13 @@ def test_opposite_demand_must_persist_ten_minutes(thermostat):
     assert scheduler.run_smart_control(now+timedelta(minutes=10))['midea_mode']=='cool'
 
 
-def test_brief_overshoot_resets_reversal_confirmation(thermostat):
+def test_comfort_band_resets_reversal_confirmation(thermostat):
     now, config, sensor, state, unit = thermostat
     config.update(last_conditioning_mode='heat',opposite_demand_mode='cool',
                   opposite_demand_since=(now-timedelta(minutes=8)).isoformat())
     state.update(running=True,mode=5,fan_speed=40)
-    sensor['temperature_f']=74
-    assert scheduler.run_smart_control(now)['reason']=='settling_before_reversal'
+    sensor['temperature_f']=72.5
+    assert scheduler.run_smart_control(now)['reason']=='comfort_circulation'
     assert config['opposite_demand_since'] is None
     unit.command.assert_not_called()
 
@@ -415,3 +469,4 @@ def test_weather_requires_recent_data_and_real_room_recovery(thermostat,fresh):
         unit.command.assert_not_called()
     else:
         assert result['action']=='adjusted' and result['midea_mode']=='cool'
+

@@ -400,12 +400,16 @@ def load_smart_control_config() -> dict[str, Any]:
                 defaults.update(value)
         except Exception:
             pass
+    # Smart Room owns direction selection. Old panel/SMS mode pins must not
+    # prevent it cooling a hot room or heating a cold room.
+    defaults['preferred_mode'] = 'auto'
     return defaults
 
 
 def save_smart_control_config(data: dict[str, Any]) -> dict[str, Any]:
     current = load_smart_control_config()
     current.update(data)
+    current['preferred_mode'] = 'auto'
     payload = json.dumps(current, separators=(",", ":"))
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
@@ -951,3 +955,4 @@ def get_latest_device_state() -> dict[str, Any] | None:
         "state": state or {},
         "error": error,
     }
+

@@ -96,7 +96,7 @@ async function loadSmartControl(){
     const enabledEl=qs('#smart-control-enabled'),targetEl=qs('#smart-control-target'),mode=qs('#smart-control-mode'),cal=qs('#smart-control-calibration'),deadband=qs('#smart-control-deadband'),interval=qs('#smart-control-interval');
     if(enabledEl)enabledEl.value=String(enabled);
     if(targetEl)targetEl.value=target??73;
-    if(mode)mode.value=d.preferred_mode??'auto';
+    if(mode)mode.value='auto';
     if(cal)cal.value=d.sensor_calibration_f??0;
     if(deadband)deadband.value=d.deadband_f??1;
     if(interval)interval.value=d.min_command_interval_minutes??5;
@@ -139,7 +139,7 @@ async function loadSmartControl(){
     const detail=qs('#dashboard-smart-detail');
     if(detail){
       const presetLabel=activePreset==='all_day'?'All Day':activePreset==='sleeping'?'Sleeping':activePreset==='sudah'?'Sudah':'Custom';
-      const modeLabel=(d.preferred_mode||'auto').replace(/^./,c=>c.toUpperCase());
+      const modeLabel='Automatic heat / cool / fan';
       const sensorAge=sensor?.updated_at?new Date(sensor.updated_at).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):'unknown';
       detail.textContent=(enabled?((d.control_message||'Checking automatic control')+'. '):'Smart Room is currently off. ')+
         `Preset: ${presetLabel} · Mode: ${modeLabel} · Deadband ±${d.deadband_f??1}°F · Min interval ${d.min_command_interval_minutes??5} min · ${d.sensor_paused?'Sensor reads paused':d.sensor_idle?'Sensor refreshes every 20 minutes':'Sensor '+sensorAge}`;
@@ -178,7 +178,7 @@ async function saveSmartControl(){
   if(btn)btn.disabled=true;if(state)state.textContent='Saving…';
   try{
     const enabled=qs('#smart-control-enabled')?.value==='true';
-    const preferred_mode=qs('#smart-control-mode')?.value||'auto';
+    const preferred_mode='auto';
     const calibration_f=Number(qs('#smart-control-calibration')?.value);
     const deadband_f=Number(qs('#smart-control-deadband')?.value);
     const min_command_interval_minutes=Number(qs('#smart-control-interval')?.value);
@@ -308,3 +308,4 @@ qs('#schedule-list').addEventListener('click',async e=>{const btn=e.target.close
 qs('#schedule-form').addEventListener('submit',async e=>{e.preventDefault();const p=formPayload();const error=validatePayload(p),box=qs('#schedule-error');if(error){box.textContent=error;box.classList.remove('hidden');return;}box.classList.add('hidden');const save=qs('#save-schedule');save.disabled=true;save.textContent='Saving…';try{if(editingId){await jfetch(`/api/schedules/${editingId}`,{method:'PATCH',body:JSON.stringify(p)});}else{await jfetch('/api/schedules',{method:'POST',body:JSON.stringify(p)});}resetForm();hideForm();await loadSchedules();}catch(err){box.textContent=err.message;box.classList.remove('hidden');}finally{save.disabled=false;save.textContent='Save schedule';}});
 
 initTimePicker();updateScheduleTypeUI();loadCachedStatus();loadHealth().then(()=>refreshStatus({silent:Boolean(currentStatus)})).catch(()=>{});loadSmartControl().catch(()=>{});loadSchedules().catch(()=>{});setInterval(()=>{if(!document.hidden&&qs('#dashboard')?.classList.contains('active'))loadSmartControl().catch(()=>{});},30000);
+

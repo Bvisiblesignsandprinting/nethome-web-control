@@ -254,9 +254,8 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     room_f = float(sensor["temperature_f"]) + float(config.get("sensor_calibration_f") or 0)
     target_f = float(config.get("target_temperature_f") or 73)
     deadband_f = max(0.5, float(config.get("deadband_f") or 1.0))
-    preferred_mode = str(config.get("preferred_mode") or "auto").lower()
-    if preferred_mode not in {"auto", "cool", "heat"}:
-        preferred_mode = "auto"
+    # Automatic room control is bidirectional, even for legacy Heat/Cool pins.
+    preferred_mode = 'auto'
 
     outside_f, config = _outside_temperature(config, now_utc)
     error_f = target_f - room_f
@@ -341,21 +340,20 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     candidate = 'heat' if error_f > 0 else 'cool'
     previous_mode = config.get('last_conditioning_mode') or {2:'cool',4:'heat'}.get(current_mode)
     if preferred_mode == 'auto' and previous_mode and candidate != previous_mode and abs_error_f < 6.0:
-        # Small overshoots get air mixing and time to settle, not an immediate
-        # heat/cool reversal. A 3-6F opposite demand must persist ten minutes.
+        # Quiet settling is bounded: 15 minutes below 3F, 10 minutes at 3-6F.
+        # A persistent out-of-band error must eventually be corrected.
         since = config.get('opposite_demand_since')
-        if abs_error_f < 3.0:
-            save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
-            return _coast(config, state, result, now_utc, 'settling_before_reversal')
+        settling_reason = 'settling_before_reversal' if abs_error_f < 3 else 'confirming_opposite_demand'
+        confirm_seconds = 900 if abs_error_f < 3 else 600
         if config.get('opposite_demand_mode') != candidate or not since:
             save_smart_control_config({'opposite_demand_since': now_utc.isoformat(), 'opposite_demand_mode': candidate})
-            return _coast(config, state, result, now_utc, 'confirming_opposite_demand')
+            return _coast(config, state, result, now_utc, settling_reason)
         try:
-            confirmed = (now_utc - datetime.fromisoformat(since)).total_seconds() >= 600
+            confirmed = (now_utc - datetime.fromisoformat(since)).total_seconds() >= confirm_seconds
         except (ValueError, TypeError):
             confirmed = False
         if not confirmed:
-            return _coast(config, state, result, now_utc, 'confirming_opposite_demand')
+            return _coast(config, state, result, now_utc, settling_reason)
     elif config.get('opposite_demand_since'):
         save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
 
@@ -377,27 +375,7 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
         result["reason"] = "minimum_interval"
         return result
 
-    desired_mode = preferred_mode
-    if preferred_mode == "auto":
-        desired_mode = "heat" if error_f > 0 else "cool"
-    elif preferred_mode == "cool" and error_f > 0:
-        if running:
-            command_result = midea.command({"action": "off"})
-            save_device_state(command_result, True, source="smart-control")
-            saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
-            result.update({"action": "off", "reason": "cool_not_needed", "last_command_at": saved.get("last_command_at")})
-        else:
-            result.update({"action": "hold", "reason": "cool_not_needed"})
-        return result
-    elif preferred_mode == "heat" and error_f < 0:
-        if running:
-            command_result = midea.command({"action": "off"})
-            save_device_state(command_result, True, source="smart-control")
-            saved = save_smart_control_config({"last_command_at": now_utc.isoformat()})
-            result.update({"action": "off", "reason": "heat_not_needed", "last_command_at": saved.get("last_command_at")})
-        else:
-            result.update({"action": "hold", "reason": "heat_not_needed"})
-        return result
+    desired_mode = candidate
 
     desired_mode_code = {"cool": 2, "heat": 4}.get(desired_mode, current_mode)
 
@@ -714,3 +692,4 @@ def run_due_schedules(now_utc: datetime | None = None) -> dict[str, Any]:
             summary['sensor_monitor'] = {'ok': False, 'error': 'Sensor refresh unavailable'}
     summary["smart_control"] = run_smart_control(now_utc + timedelta(seconds=monotonic() - started))
     return summary
+

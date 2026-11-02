@@ -163,7 +163,6 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
     enabled = bool(config.get("enabled"))
     issue = (sensor_control_issue(sensor, config=config) or evaluation_issue(config)) if enabled else None
     preset = str(config.get("active_preset") or "custom").replace("_", " ").title()
-    preferred = str(config.get("preferred_mode") or "auto").title()
     deadband = float(config.get("deadband_f") or 1.0)
     interval = int(config.get("min_command_interval_minutes") or 5)
 
@@ -172,7 +171,7 @@ def _smart_status_reply(midea_state: dict[str, Any] | None = None, *, explain: b
         f"Smart: {'🟢 On' if enabled else '⚫ Off'}",
         f"Target: {target:g}°F",
         f"Preset: {preset}",
-        f"Preferred mode: {preferred}",
+        "Control: Automatic heat / cool / fan",
         f"Deadband: ±{deadband:g}°F",
         f"Min interval: {interval} min",
     ]
@@ -332,7 +331,10 @@ def _handle_smart_command(command: str, raw_text: str) -> dict[str, Any] | None:
     mode_match = re.fullmatch(r"SMART\s+MODE\s+(AUTO|COOL|HEAT)", text)
     if mode_match:
         mode = mode_match.group(1).lower()
-        return _set_smart_config({"preferred_mode": mode, "comfort_since": None}, f"Smart mode {mode.title()}")
+        reply = "Smart Auto chooses heat, cool or fan to reach the target."
+        if mode != 'auto':
+            reply += " Turn Smart off first for manual Heat or Cool."
+        return _set_smart_config({"preferred_mode": 'auto', "comfort_since": None}, reply)
 
     deadband_match = re.fullmatch(r"DEADBAND\s+(\d(?:\.\d)?)", text)
     if deadband_match:
@@ -1063,7 +1065,7 @@ SMART OFF
 SMART <50-90>
 TARGET <50-90>
 PRESET SUDAH|ALL DAY|SLEEPING
-SMART MODE AUTO|COOL|HEAT
+SMART MODE AUTO (automatic heat / cool / fan)
 DEADBAND <0.5-5>
 INTERVAL <1-60>
 SENSOR
@@ -1598,3 +1600,4 @@ def process_text_command(raw: str) -> dict[str, Any]:
         "ok": False,
         "reply": "🤔 I didn't catch that.\nTry saying it naturally, like:\n• Check status\n• Make it 72°\n• Show next 10 days\nOr text HELP.",
     }
+

@@ -22,6 +22,20 @@ def client(tmp_path_factory):
             app.dependency_overrides.clear()
 
 
+@pytest.mark.parametrize('mode',['heat','cool'])
+def test_legacy_smart_mode_input_stays_bidirectional_without_actuation(client,monkeypatch,mode):
+    from unittest.mock import Mock
+    from app import main
+    control=Mock()
+    monkeypatch.setattr(main.midea,'command',control)
+    response=client.post('/api/smart-control',json={'preferred_mode':mode,'target_temperature':75,'enabled':False})
+    assert response.status_code==200
+    config=response.json()['config']
+    assert config['preferred_mode']=='auto' and config['enabled'] is False
+    assert config['target_temperature']==75
+    control.assert_not_called()
+
+
 def test_health(client):
     r = client.get('/api/health')
     assert r.status_code == 200
