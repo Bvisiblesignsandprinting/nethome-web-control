@@ -77,6 +77,13 @@ def test_existing_history_and_other_private_records_survive(store):
     assert db.load_sharing_record('pending') == 'test-pending'
 
 
+def test_latest_state_uses_observation_time_across_sources(store):
+    db.save_device_state({'reading': 'old-cloud'}, True, source='cloud')
+    db.save_device_state({'reading': 'worker'}, True, source='worker')
+    db.save_device_state({'reading': 'new-cloud'}, True, source='cloud')
+    assert db.get_latest_device_state()['state']['reading'] == 'new-cloud'
+
+
 def test_cloud_lock_returns_pooled_connection_without_closing(monkeypatch):
     monkeypatch.setattr(db, 'DATABASE_URL', 'test-only')
     connection = Mock()

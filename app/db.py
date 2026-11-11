@@ -864,7 +864,7 @@ def get_latest_device_state() -> dict[str, Any] | None:
                 select created_at, result, details
                 from public.activity
                 where source in ('cloud', 'worker') and action = 'device_state'
-                order by id desc
+                order by created_at desc, id desc
                 limit 1
                 """
             )
@@ -877,7 +877,7 @@ def get_latest_device_state() -> dict[str, Any] | None:
                 SELECT created_at, result, details
                 FROM activity
                 WHERE source IN ('cloud', 'worker') AND action = 'device_state'
-                ORDER BY id DESC
+                ORDER BY created_at DESC, id DESC
                 LIMIT 1
                 """
             ).fetchone()
