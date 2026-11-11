@@ -11,6 +11,8 @@ from typing import Any
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "nethome.db"
 DATABASE_URL = os.getenv("DATABASE_URL")
+_PG_POOL = None
+_PG_POOL_LOCK = threading.Lock()
 _LOCAL_CLOUD_LOCK = threading.RLock()
 _CLOUD_LOCK_KEY = 151732606
 _SENSOR_LOCK_KEY = 151732607
@@ -59,16 +61,8 @@ def load_sensor_cache() -> dict[str, Any]:
 
 
 def save_sensor_cache(data: dict[str, Any]) -> None:
-    """Bounded internal state in the existing store; never contains Tuya credentials."""
-    payload = json.dumps(data, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute("delete from public.activity where source = 'tuya-cache' and action = 'sensor'")
-            cur.execute("insert into public.activity(source, action, result, details) values ('tuya-cache', 'sensor', 'active', %s)", (payload,))
-    else:
-        with _sqlite_conn() as conn:
-            conn.execute("delete from activity where source = 'tuya-cache' and action = 'sensor'")
-            conn.execute("insert into activity(created_at, source, action, result, details) values (?, 'tuya-cache', 'sensor', 'active', ?)", (_now(), payload))
+    _save_current_record('tuya-cache', 'sensor', 'active',
+                         json.dumps(data, separators=(",", ":"), sort_keys=True))
 
 
 def _now() -> str:
@@ -91,14 +85,7 @@ def load_sharing_record(action: str) -> str | None:
 def save_sharing_record(action: str, encrypted: str) -> None:
     if action not in {'session', 'pending'}:
         raise ValueError('Invalid sharing record')
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute("delete from public.activity where source='tuya-sharing' and action=%s", (action,))
-            cur.execute("insert into public.activity(source,action,result,details) values('tuya-sharing',%s,'active',%s)", (action, encrypted))
-    else:
-        with _sqlite_conn() as conn:
-            conn.execute("delete from activity where source='tuya-sharing' and action=?", (action,))
-            conn.execute("insert into activity(created_at,source,action,result,details) values(?,'tuya-sharing',?,'active',?)", (_now(), action, encrypted))
+    _save_current_record('tuya-sharing', action, 'active', encrypted)
 
 
 def _use_postgres() -> bool:
@@ -112,30 +99,76 @@ def _sqlite_conn() -> sqlite3.Connection:
     return conn
 
 
-def _pg_conn():
-    import psycopg
-    from psycopg.rows import dict_row
+def _get_pg_pool():
+    # Warm serverless workers reuse TLS connections; idle workers keep none.
+    # No automatic query retries: an uncertain device/config write is never replayed.
+    global _PG_POOL
+    if _PG_POOL is None:
+        with _PG_POOL_LOCK:
+            if _PG_POOL is None:
+                from psycopg.rows import dict_row
+                from psycopg_pool import ConnectionPool
+                _PG_POOL = ConnectionPool(
+                    conninfo=DATABASE_URL, name="nethome", min_size=0, max_size=6,
+                    timeout=10, max_idle=60, max_lifetime=300, reconnect_timeout=30,
+                    kwargs={"row_factory": dict_row, "connect_timeout": 8,
+                            "prepare_threshold": None},
+                )
+    return _PG_POOL
 
-    return psycopg.connect(DATABASE_URL, row_factory=dict_row)
+
+def _pg_conn():
+    return _get_pg_pool().connection()
 
 
 @contextmanager
 def cloud_operation_lock():
-    """Serialize NetHome/Midea cloud calls across all Vercel instances."""
+    """Serialize NetHome/Midea calls across instances with a transaction lock."""
     if _use_postgres():
-        conn = _pg_conn()
-        try:
-            with conn:
-                with conn.cursor() as cur:
-                    cur.execute("set local lock_timeout = '25s'")
-                    cur.execute("select pg_advisory_xact_lock(%s)", (_CLOUD_LOCK_KEY,))
-                yield
-        finally:
-            conn.close()
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("set local lock_timeout = '25s'")
+            cur.execute("select pg_advisory_xact_lock(%s)", (_CLOUD_LOCK_KEY,))
+            yield
         return
-
     with _LOCAL_CLOUD_LOCK:
         yield
+
+
+def _save_current_record(source: str, action: str, result: str, payload: str, *, heartbeat: bool = False, match_result: bool = False) -> None:
+    """Update one current snapshot, keeping existing history and private records.
+
+    Row locks prevent concurrent updates to an existing snapshot. A first-write
+    race can create two snapshots, as before; readers always select the latest.
+    No-op saves produce no UPDATE/WAL. All values remain parameterized.
+    """
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            condition = " and result=%s" if match_result else ""
+            parameters = (source, action, result) if match_result else (source, action)
+            cur.execute("select id, result, details from public.activity "
+                        "where source=%s and action=%s" + condition + " order by id desc limit 1 for update",
+                        parameters)
+            row = cur.fetchone()
+            if row:
+                if heartbeat or row['result'] != result or row['details'] != payload:
+                    cur.execute("update public.activity set result=%s, details=%s, created_at=now() where id=%s",
+                                (result, payload, row['id']))
+            else:
+                cur.execute("insert into public.activity(source, action, result, details) values (%s,%s,%s,%s)",
+                            (source, action, result, payload))
+    else:
+        with _sqlite_conn() as conn:
+            condition = " and result=?" if match_result else ""
+            parameters = (source, action, result) if match_result else (source, action)
+            row = conn.execute("select id, result, details from activity where source=? and action=?" + condition + " order by id desc limit 1",
+                               parameters).fetchone()
+            if row:
+                if heartbeat or row['result'] != result or row['details'] != payload:
+                    conn.execute("update activity set result=?, details=?, created_at=? where id=?",
+                                 (result, payload, _now(), row['id']))
+            else:
+                conn.execute("insert into activity(created_at,source,action,result,details) values (?,?,?,?,?)",
+                             (_now(), source, action, result, payload))
 
 
 def load_cloud_session() -> dict[str, Any] | None:
@@ -179,32 +212,8 @@ def load_cloud_session() -> dict[str, Any] | None:
 
 
 def save_cloud_session(data: dict[str, Any]) -> None:
-    payload = json.dumps(data, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "delete from public.activity where source = 'cloud-auth' and action = 'session'"
-            )
-            cur.execute(
-                """
-                insert into public.activity(source, action, result, details)
-                values ('cloud-auth', 'session', 'active', %s)
-                """,
-                (payload,),
-            )
-        return
-
-    with _sqlite_conn() as conn:
-        conn.execute(
-            "delete from activity where source = 'cloud-auth' and action = 'session'"
-        )
-        conn.execute(
-            """
-            insert into activity(created_at, source, action, result, details)
-            values (?, 'cloud-auth', 'session', 'active', ?)
-            """,
-            (_now(), payload),
-        )
+    _save_current_record('cloud-auth', 'session', 'active',
+                         json.dumps(data, separators=(",", ":"), sort_keys=True))
 
 
 def clear_cloud_session() -> None:
@@ -258,32 +267,8 @@ def load_sms_config() -> dict[str, Any]:
 
 
 def save_sms_config(data: dict[str, Any]) -> None:
-    payload = json.dumps(data, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "delete from public.activity where source = 'sms-config' and action = 'settings'"
-            )
-            cur.execute(
-                """
-                insert into public.activity(source, action, result, details)
-                values ('sms-config', 'settings', 'active', %s)
-                """,
-                (payload,),
-            )
-        return
-
-    with _sqlite_conn() as conn:
-        conn.execute(
-            "delete from activity where source = 'sms-config' and action = 'settings'"
-        )
-        conn.execute(
-            """
-            insert into activity(created_at, source, action, result, details)
-            values (?, 'sms-config', 'settings', 'active', ?)
-            """,
-            (_now(), payload),
-        )
+    _save_current_record('sms-config', 'settings', 'active',
+                         json.dumps(data, separators=(",", ":"), sort_keys=True))
 
 
 def load_email_bridge_config() -> dict[str, Any]:
@@ -323,33 +308,8 @@ def load_email_bridge_config() -> dict[str, Any]:
 
 
 def save_email_bridge_config(data: dict[str, Any]) -> None:
-    payload = json.dumps(data, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                "delete from public.activity where source = 'email-bridge-config' and action = 'settings'"
-            )
-            cur.execute(
-                """
-                insert into public.activity(source, action, result, details)
-                values ('email-bridge-config', 'settings', 'active', %s)
-                """,
-                (payload,),
-            )
-        return
-
-    with _sqlite_conn() as conn:
-        conn.execute(
-            "delete from activity where source = 'email-bridge-config' and action = 'settings'"
-        )
-        conn.execute(
-            """
-            insert into activity(created_at, source, action, result, details)
-            values (?, 'email-bridge-config', 'settings', 'active', ?)
-            """,
-            (_now(), payload),
-        )
-
+    _save_current_record('email-bridge-config', 'settings', 'active',
+                         json.dumps(data, separators=(",", ":"), sort_keys=True))
 
 
 def load_smart_control_config() -> dict[str, Any]:
@@ -410,27 +370,8 @@ def save_smart_control_config(data: dict[str, Any]) -> dict[str, Any]:
     current = load_smart_control_config()
     current.update(data)
     current['preferred_mode'] = 'auto'
-    payload = json.dumps(current, separators=(",", ":"))
-    if _use_postgres():
-        with _pg_conn() as conn, conn.cursor() as cur:
-            cur.execute("delete from public.activity where source = 'smart-control-config' and action = 'settings'")
-            cur.execute(
-                """
-                insert into public.activity(source, action, result, details)
-                values ('smart-control-config', 'settings', 'active', %s)
-                """,
-                (payload,),
-            )
-    else:
-        with _sqlite_conn() as conn:
-            conn.execute("delete from activity where source = 'smart-control-config' and action = 'settings'")
-            conn.execute(
-                """
-                insert into activity(created_at, source, action, result, details)
-                values (?, 'smart-control-config', 'settings', 'active', ?)
-                """,
-                (_now(), payload),
-            )
+    _save_current_record('smart-control-config', 'settings', 'active',
+                         json.dumps(current, separators=(",", ":"), sort_keys=True))
     return current
 
 
@@ -636,6 +577,12 @@ def delete_schedule(schedule_id: int) -> bool:
 
 
 def add_activity(source: str, action: str, result: str, details: str | None = None) -> None:
+    # Polling snapshots are current state, not an ever-growing event stream.
+    # User commands, schedule executions, warnings and errors retain their history.
+    if action == 'device_state' or (source == 'tuya' and action == 'indoor_sensor' and result == 'success'):
+        _save_current_record(source, action, result, details or '', heartbeat=True,
+                             match_result=action == 'indoor_sensor')
+        return
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
             cur.execute(

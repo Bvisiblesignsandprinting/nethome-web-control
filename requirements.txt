@@ -11,3 +11,5 @@ cryptography==46.0.3
 imageio-ffmpeg==0.6.0
 tuya-device-sharing-sdk==0.2.15
 qrcode==8.2
+
+psycopg-pool==3.3.3

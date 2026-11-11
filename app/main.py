@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -17,6 +18,8 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from psycopg import OperationalError
+from psycopg_pool import PoolTimeout
 
 from .config import settings
 from .db import (
@@ -72,8 +75,13 @@ SESSION_VALUE = "authenticated-v1"
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    init_db()
-    apply_requested_smart_room_schedule()
+    try:
+        init_db()
+        apply_requested_smart_room_schedule()
+    except (OperationalError, PoolTimeout):
+        # Keep sign-in/static pages available during a database outage.
+        # Never replace persistent state with temporary defaults or retry commands.
+        logging.getLogger(__name__).warning('Database unavailable at startup; controls require database recovery')
     async with nethome_mcp.session_manager.run():
         yield
 
@@ -81,6 +89,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="NetHome Web Control", version="0.4.1", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 app.mount("/mcp", mcp_http_app)
+
+
+@app.exception_handler(OperationalError)
+@app.exception_handler(PoolTimeout)
+async def database_unavailable(request: Request, exc: Exception):
+    return JSONResponse(status_code=503, content={
+        'ok': False, 'database_available': False,
+        'detail': 'Saved settings are temporarily unavailable. Database recovery is required.',
+    }, headers={'Retry-After': '60', 'Cache-Control': 'no-store'})
 
 
 def _sign_session(value: str) -> str:
@@ -1103,3 +1120,4 @@ Welcome to NetHome AC Control. This private service sends HVAC status, weather-b
 <div class="box"><strong>Enrollment confirmation:</strong><br>
 NetHome AC Control: You are enrolled. Message frequency varies. Msg & data rates may apply. Reply HELP for help or STOP to opt out.</div>
 </body></html>"""
+
