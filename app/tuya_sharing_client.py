@@ -19,7 +19,8 @@ from tuya_sharing.customerapi import SharingTokenListener
 
 from .config import settings
 from .db import (load_sharing_record, save_sharing_record, sensor_operation_lock,
-                 load_sensor_cache, save_sensor_cache, load_smart_control_config)
+                 load_sensor_cache, save_sensor_cache, load_smart_control_config,
+                 sharing_record_exists)
 
 CLIENT_ID = 'HA_3y9q4ak7g4ephrvke'
 INTERVAL = 30
@@ -51,7 +52,7 @@ def _save(action, value):
 
 def configured():
     # Corrupt encrypted state fails closed; it must not silently use the trial.
-    return bool(load_sharing_record('session'))
+    return sharing_record_exists('session')
 
 
 def connection_status():
@@ -242,3 +243,4 @@ def indoor_sensor(max_cache_age_seconds=INTERVAL, *, force=False):
             cache['next_fetch_at'] = time.time() + ERROR_BACKOFF
             save_sensor_cache(cache)
             raise SharingError('Sensor refresh failed; no stale reading was used') from None
+

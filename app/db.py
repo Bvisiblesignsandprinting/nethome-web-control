@@ -88,6 +88,21 @@ def save_sharing_record(action: str, encrypted: str) -> None:
     _save_current_record('tuya-sharing', action, 'active', encrypted)
 
 
+def sharing_record_exists(action: str) -> bool:
+    """Check the newest record without transferring its encrypted credential."""
+    if action not in {'session', 'pending'}:
+        raise ValueError('Invalid sharing record')
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("select coalesce((select details<>'' from public.activity "
+                        "where source='tuya-sharing' and action=%s order by id desc limit 1),false) as present", (action,))
+            return bool(cur.fetchone()['present'])
+    with _sqlite_conn() as conn:
+        row = conn.execute("select coalesce((select details<>'' from activity "
+                           "where source='tuya-sharing' and action=? order by id desc limit 1),0) as present", (action,)).fetchone()
+        return bool(row['present'])
+
+
 def _use_postgres() -> bool:
     return bool(DATABASE_URL)
 
@@ -145,12 +160,12 @@ def _save_current_record(source: str, action: str, result: str, payload: str, *,
         with _pg_conn() as conn, conn.cursor() as cur:
             condition = " and result=%s" if match_result else ""
             parameters = (source, action, result) if match_result else (source, action)
-            cur.execute("select id, result, details from public.activity "
+            cur.execute("select id, (result is distinct from %s or details is distinct from %s) as changed from public.activity "
                         "where source=%s and action=%s" + condition + " order by id desc limit 1 for update",
-                        parameters)
+                        (result, payload, *parameters))
             row = cur.fetchone()
             if row:
-                if heartbeat or row['result'] != result or row['details'] != payload:
+                if heartbeat or row['changed']:
                     cur.execute("update public.activity set result=%s, details=%s, created_at=now() where id=%s",
                                 (result, payload, row['id']))
             else:

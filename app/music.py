@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 import logging
 import re
+import threading
+import time
 import unicodedata
 from typing import Callable
 from urllib.error import HTTPError, URLError
@@ -83,6 +85,15 @@ class MusicStorage:
         self.origin = settings.music_storage_url
         self.key = settings.music_storage_key
         self.bucket = settings.music_bucket
+        self._catalog_lock = threading.RLock()
+        self._catalog_rows = []
+        self._catalog_until = 0.0
+        self._catalog_identity = None
+
+    def _invalidate_catalog(self):
+        with self._catalog_lock:
+            self._catalog_until = 0.0
+            self._catalog_rows = []
 
     @property
     def configured(self) -> bool:
@@ -154,7 +165,16 @@ class MusicStorage:
 
     def tracks(self, offset: int):
         self.check_bucket()
-        rows = sorted(self._walk_tracks(), key=lambda row: row.get("created_at") or "", reverse=True)
+        # Reuse the scan while paging. Opening/refreshing page zero always scans
+        # again, so completed uploads and changes from other workers appear.
+        with self._catalog_lock:
+            identity = (self.origin, self.bucket, self.key)
+            if offset == 0 or time.monotonic() >= self._catalog_until or identity != self._catalog_identity:
+                rows = sorted(self._walk_tracks(), key=lambda row: row.get("created_at") or "", reverse=True)
+                self._catalog_rows = rows
+                self._catalog_identity = identity
+                self._catalog_until = time.monotonic() + 60
+            rows = self._catalog_rows
         tracks = []
         for row in rows[offset:offset + 100]:
             name = row["relative"]
@@ -167,6 +187,7 @@ class MusicStorage:
 
     def upload(self, body: UploadRequest):
         self.check_bucket()
+        self._invalidate_catalog()
         name = object_name(body.filename, body.relative_path)
         result = self.request("POST", f"/object/upload/sign/{self.bucket}/tracks/{name}", {})
         return {"id": name, "upload_url": self.absolute_signed_url(result["url"]),
@@ -224,6 +245,7 @@ class MusicStorage:
     def delete(self, name: str):
         validate_object(name)
         self.request("DELETE", f"/object/{self.bucket}", {"prefixes": [f"tracks/{name}"]})
+        self._invalidate_catalog()
         return {"ok": True}
 
 

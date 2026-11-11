@@ -109,7 +109,7 @@ def test_cloud_lock_returns_pooled_connection_without_closing(monkeypatch):
 def test_postgres_noop_uses_no_update_or_delete(monkeypatch):
     monkeypatch.setattr(db, 'DATABASE_URL', 'test-only')
     cursor = Mock()
-    cursor.fetchone.return_value = {'id': 7, 'result': 'active', 'details': '{}'}
+    cursor.fetchone.return_value = {'id': 7, 'changed': False}
     @contextmanager
     def checkout():
         connection = Mock()
