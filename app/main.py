@@ -22,6 +22,7 @@ from psycopg import OperationalError
 from psycopg_pool import PoolTimeout
 
 from .config import settings
+from .tuya_plugs import router as plugs_router
 from .db import (
     add_activity,
     claim_next_execution,
@@ -133,6 +134,7 @@ def access_auth(
 
 app.include_router(music_router(access_auth))
 app.include_router(lighting_router(access_auth))
+app.include_router(plugs_router(access_auth))
 app.include_router(wifi_router(access_auth))
 app.include_router(radio_router(access_auth))
 
@@ -154,6 +156,11 @@ def sensor_setup_origin(request: Request):
 @app.get('/sensor-setup', dependencies=[Depends(access_auth)])
 def sensor_setup_page():
     return FileResponse(STATIC / 'sensor-setup.html', headers={'Cache-Control': 'no-store'})
+
+
+@app.get('/plug-setup', dependencies=[Depends(access_auth)])
+def plug_setup_page():
+    return FileResponse(STATIC / 'plug-setup.html', headers={'Cache-Control': 'no-store'})
 
 
 @app.get('/api/sensor-sharing', dependencies=[Depends(access_auth)])

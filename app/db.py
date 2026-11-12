@@ -18,6 +18,20 @@ _CLOUD_LOCK_KEY = 151732606
 _SENSOR_LOCK_KEY = 151732607
 _LOCAL_SENSOR_LOCK = threading.RLock()
 _LOCAL_SMART_LOCK = threading.RLock()
+_LOCAL_PLUG_LOCK = threading.RLock()
+
+
+@contextmanager
+def plug_operation_lock():
+    """Serialize plug assignment and explicit writes across workers."""
+    if _use_postgres():
+        with _pg_conn() as conn, conn.cursor() as cur:
+            cur.execute("set local lock_timeout = '25s'")
+            cur.execute('select pg_advisory_xact_lock(%s)', (151732609,))
+            yield
+    else:
+        with _LOCAL_PLUG_LOCK:
+            yield
 
 
 @contextmanager
@@ -70,7 +84,7 @@ def _now() -> str:
 
 
 def load_sharing_record(action: str) -> str | None:
-    if action not in {'session', 'pending'}:
+    if action not in {'session', 'pending', 'plug-config', 'plug-cache', 'plug-discovery'}:
         raise ValueError('Invalid sharing record')
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
@@ -83,14 +97,14 @@ def load_sharing_record(action: str) -> str | None:
 
 
 def save_sharing_record(action: str, encrypted: str) -> None:
-    if action not in {'session', 'pending'}:
+    if action not in {'session', 'pending', 'plug-config', 'plug-cache', 'plug-discovery'}:
         raise ValueError('Invalid sharing record')
     _save_current_record('tuya-sharing', action, 'active', encrypted)
 
 
 def sharing_record_exists(action: str) -> bool:
     """Check the newest record without transferring its encrypted credential."""
-    if action not in {'session', 'pending'}:
+    if action not in {'session', 'pending', 'plug-config', 'plug-cache', 'plug-discovery'}:
         raise ValueError('Invalid sharing record')
     if _use_postgres():
         with _pg_conn() as conn, conn.cursor() as cur:
@@ -917,4 +931,5 @@ def get_latest_device_state() -> dict[str, Any] | None:
         "state": state or {},
         "error": error,
     }
+
 
