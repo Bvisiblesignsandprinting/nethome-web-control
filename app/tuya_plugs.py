@@ -167,16 +167,34 @@ def command(target, power, revision):
             results.append({'role': role, 'accepted': accepted})
             if not accepted:
                 break
-        try:
-            after = readings(client, saved['bindings'])
-            cache = {'at': time.time(), 'attempt_at': time.time(), 'states': after}
-        except Exception:
-            after, cache = {}, {}
+        accepted_all = len(results) == len(roles) and all(r['accepted'] for r in results)
+        after, cache, confirmed = {}, {}, False
+        # The relay changes before Tuya's reported status catches up. Retry
+        # only bounded status reads, never a power write (including partials).
+        for delay in (0, .5, 1, 2):
+            if delay:
+                if not accepted_all:
+                    break
+                time.sleep(delay)
+            try:
+                after = readings(client, saved['bindings'])
+                cache = {'at': time.time(), 'attempt_at': time.time(), 'states': after}
+            except Exception:
+                after, cache = {}, {}
+            confirmed = accepted_all and all(
+                after.get(r['role'], {}).get('power') is power for r in results)
+            if confirmed:
+                break
+        pending = accepted_all and not confirmed
+        if pending:
+            # Do not cache the pre-command state for another minute or show it
+            # as the current state. The next normal refresh can check again.
+            cache = {}
         sharing._save('plug-cache', cache)
-        confirmed = len(results) == len(roles) and all(r['accepted'] and
-                    after.get(r['role'], {}).get('power') is power for r in results)
         return {'ok': confirmed, 'results': results, 'state': _snapshot(saved, cache, False),
+                'confirmation_pending': pending,
                 'message': 'Power confirmed' if confirmed else
+                'Command accepted; waiting for plug status. Refresh status before another command.' if pending else
                 'Power not fully confirmed. Check each plug before trying again.'}
 
 

@@ -101,6 +101,55 @@ def test_partial_failure_never_claims_success_or_rolls_back(rig):
     assert len(rig.writes)==2
 
 
+def test_delayed_report_confirms_without_resending_power(rig,monkeypatch):
+    bind()
+    original=plugs.readings
+    count=0
+    waits=[]
+    def delayed(client,bindings):
+        nonlocal count
+        count+=1
+        data=original(client,bindings)
+        # Preflight, then one stale post-write status, then the updated report.
+        if count==2:
+            data['utility']['power']=False
+        return data
+    monkeypatch.setattr(plugs,'readings',delayed)
+    monkeypatch.setattr(plugs.time,'sleep',waits.append)
+    result=plugs.command('utility',True,1)
+    assert result['ok'] and not result['confirmation_pending']
+    assert waits==[.5] and len(rig.writes)==1
+    assert next(r for r in result['state']['roles'] if r['role']=='utility')['power'] is True
+
+
+def test_unconfirmed_accepted_write_is_pending_not_cached_as_old_power(rig,monkeypatch):
+    bind()
+    original=plugs.readings
+    waits=[]
+    def stale(client,bindings):
+        data=original(client,bindings)
+        for value in data.values():value['power']=False
+        return data
+    monkeypatch.setattr(plugs,'readings',stale)
+    monkeypatch.setattr(plugs.time,'sleep',waits.append)
+    result=plugs.command('utility',True,1)
+    assert not result['ok'] and result['confirmation_pending']
+    assert waits==[.5,1,2] and len(rig.writes)==1
+    assert not result['state']['fresh']
+    assert next(r for r in result['state']['roles'] if r['role']=='utility')['power'] is None
+    monkeypatch.setattr(plugs,'readings',original)
+    assert next(r for r in plugs.status()['roles'] if r['role']=='utility')['power'] is True
+
+
+def test_rejected_command_does_not_poll_or_retry_writes(rig,monkeypatch):
+    bind();rig.rejected.add('utility')
+    waits=[]
+    monkeypatch.setattr(plugs.time,'sleep',waits.append)
+    result=plugs.command('utility',True,1)
+    assert not result['ok'] and not result['confirmation_pending']
+    assert not waits and len(rig.writes)==1
+
+
 def test_status_shared_cache_single_bulk_read_and_expiry(rig):
     bind()
     with ThreadPoolExecutor(max_workers=5) as pool: list(pool.map(lambda _:plugs.status(),range(5)))
