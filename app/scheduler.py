@@ -281,11 +281,10 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
     save_smart_control_config({'temperature_history':climate['history']})
     result.update({k:v for k,v in climate.items() if k != 'history'})
     projected = climate['projected_room_f']
-    # The last live cycle gained another 1.8F after heating stopped. Reserve
-    # a bounded 1.5F for residual warmth, only with a measured warming trend
-    # and within 2F of target. This is an allowance, not a physical forecast.
-    residual_allowance = 1.5 if current_mode == 4 and climate['moving_toward_target'] and abs_error_f <= 2 else 0
-    result['residual_heat_allowance_f'] = residual_allowance
+    # An active-heating trend is not evidence of future residual warmth.
+    # Do not add a fixed 1.5F: that repeatedly stopped heat below target.
+    result['residual_heat_allowance_f'] = 0
+    approach_window = min(deadband_f, 0.5)
     if stable_snapshot:
         result['stable_snapshot'] = True
         if running:
@@ -317,23 +316,24 @@ def _run_smart_control(now_utc: datetime | None = None) -> dict[str, Any]:
 
     # Cut conditioning before overshoot when several observations show that
     # residual heat/cold is already carrying the room to its target.
-    approaching = running and ((current_mode == 4 and error_f > 0 and projected is not None and projected + residual_allowance >= target_f)
+    approaching = running and ((current_mode == 4 and error_f > 0 and projected is not None and projected >= target_f)
                               or (current_mode == 2 and error_f < 0 and projected is not None and projected <= target_f))
-    if approaching and climate['moving_toward_target'] and abs_error_f <= 3:
+    if approaching and climate['moving_toward_target'] and abs_error_f <= approach_window:
         return _coast(config, state, result, now_utc, 'anticipating_target')
-    # Give an early cutoff its full mixing period before deciding to reheat.
-    # Otherwise a rounded reading just below the band can restart the heater
-    # before the residual warmth has reached the room sensor.
-    if running and current_mode == 5 and config.get('last_coast_reason') == 'anticipating_target' and abs_error_f <= 3:
+    # Preserve the mixing period only while the room is still close to target.
+    # If it falls away, permit correction after the existing restart interval.
+    if running and current_mode == 5 and config.get('last_coast_reason') == 'anticipating_target' and abs_error_f <= approach_window:
         return _coast(config, state, result, now_utc, 'anticipating_target')
     # Weather alone never proves that a room is recovering. Require measured
     # progress as well, and only coast near target rather than defer large errors.
-    if not (running and current_mode in {2,4}) and climate['outside_helpful'] and climate['moving_toward_target'] and abs_error_f <= 3:
+    if not (running and current_mode in {2,4}) and climate['outside_helpful'] and climate['moving_toward_target'] and abs_error_f <= approach_window:
         return _coast(config, state, result, now_utc, 'weather_assisted_settling')
 
-    # Stop active conditioning on entering the comfort band, then circulate
-    # quietly. Do not keep adding heat/cold for a three-minute settling wait.
-    if abs_error_f <= deadband_f or (wrong_direction and abs_error_f < 3.0):
+    # Hysteresis: once conditioning starts, reach the actual target (or the
+    # tightly bounded measured-trend cutoff above). Use the wider comfort band
+    # only for resting/restarting, rather than stopping active heat a degree early.
+    actively_approaching = running and ((current_mode == 4 and error_f > 0) or (current_mode == 2 and error_f < 0))
+    if (abs_error_f <= deadband_f and not actively_approaching) or (wrong_direction and abs_error_f < 3.0):
         save_smart_control_config({'opposite_demand_since': None, 'opposite_demand_mode': None})
         return _coast(config, state, result, now_utc, 'comfort_circulation')
 

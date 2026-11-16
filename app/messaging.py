@@ -18,8 +18,10 @@ from .db import (
     load_smart_control_config,
     save_device_state,
     save_smart_control_config,
+    smart_operation_lock,
     update_schedule,
 )
+from .message_intent import smart_power_intent
 from .midea_client import midea
 from .tuya_client import tuya
 from .sensor_health import sensor_control_issue, control_message, evaluation_issue
@@ -279,7 +281,8 @@ def _full_status_reply(result: dict[str, Any]) -> str:
 
 
 def _set_smart_config(patch: dict[str, Any], label: str) -> dict[str, Any]:
-    config = save_smart_control_config(patch)
+    with smart_operation_lock():
+        config = save_smart_control_config(patch)
     add_activity("sms", "smart_control", "success", f"{label}: {patch}")
     return {"ok": True, "reply": f"✅ {label}\n" + _smart_status_reply()}
 
@@ -296,10 +299,10 @@ def _handle_smart_command(command: str, raw_text: str) -> dict[str, Any] | None:
         return {"ok": True, "reply": _smart_status_reply(state, explain=True)}
 
     if text in {"SMART ON", "SMART ROOM ON"}:
-        return _set_smart_config({"enabled": True, "comfort_since": None}, "Smart Room ON")
+        return _set_smart_config({"enabled": True, "comfort_since": None}, "Smart Room ON; AC power and settings left unchanged")
 
     if text in {"SMART OFF", "SMART ROOM OFF"}:
-        return _set_smart_config({"enabled": False, "comfort_since": None}, "Smart Room OFF")
+        return _set_smart_config({"enabled": False, "comfort_since": None}, "Smart Room OFF; AC power and settings left unchanged")
 
     target_match = re.fullmatch(r"(?:SMART|TARGET|SMART TARGET)\s+(\d{2}(?:\.\d)?)", text)
     if target_match:
@@ -1340,6 +1343,14 @@ def process_text_command(raw: str) -> dict[str, Any]:
             "ok": True,
             "reply": "NetHome AC Control: messaging stopped. Text START to use it again.",
         }
+
+    smart_intent = smart_power_intent(raw_text)
+    if smart_intent == 'NO CHANGE':
+        return {'ok': False, 'reply': 'No changes made. To disable automatic control only, text SMART OFF. The AC power and settings will stay as they are.'}
+    if smart_intent == 'CLARIFY':
+        return {'ok': False, 'reply': 'No changes made. Please send Smart Room and AC commands separately. SMART OFF disables only automatic control and leaves the AC alone; OFF switches off the AC.'}
+    if smart_intent is not None:
+        return _handle_smart_command(smart_intent, raw_text)
 
     natural_schedule = _handle_natural_one_time_schedule(normalized_raw)
     if natural_schedule is not None:

@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import replace
 from unittest.mock import Mock
 import pytest
-from app import db, scheduler, main, tuya_sharing_client as sharing
+from app import db, scheduler, tuya_sharing_client as sharing
 from app.sensor_health import sensor_control_issue
 from app.tuya_client import TuyaCloudError
 
@@ -190,6 +190,7 @@ def test_future_or_malformed_fetch_fails_closed(thermostat):
 
 
 def test_run_endpoint_requires_login_and_same_origin(thermostat, monkeypatch):
+    from app import main
     from fastapi.testclient import TestClient
     monkeypatch.setattr(main, 'settings', replace(main.settings, api_token='test-api-key'))
     client = TestClient(main.app)
@@ -287,13 +288,13 @@ def test_lock_and_config_delay_is_counted_before_sensor_io(thermostat, monkeypat
 
 
 @pytest.mark.parametrize('mode,room', [(4,71.2),(2,72.8)])
-def test_entering_comfort_band_uses_low_fan_without_waiting(thermostat,mode,room):
+def test_approaching_inside_band_tapers_fan_without_stopping_conditioning(thermostat,mode,room):
     now, config, sensor, state, unit = thermostat
     state.update(running=True,mode=mode,fan_speed=60)
     sensor['temperature_f']=room
     config['last_command_at']=(now-timedelta(seconds=10)).isoformat()
-    assert scheduler.run_smart_control(now)['action']=='circulate'
-    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
+    assert scheduler.run_smart_control(now)['action']=='fan_taper'
+    unit.command.assert_called_once_with({'action':'set','fan':'low'})
 
 
 def test_small_heat_overshoot_coasts_without_cooling(thermostat):
@@ -357,9 +358,9 @@ def test_temperature_history_cuts_heat_before_projected_overshoot(thermostat):
     def sample(t, m, v):
         return {'at':(t-timedelta(minutes=m)).isoformat(),'room_f':v,'phase':'heat','calibration_f':0}
     now, config, sensor, state, unit = thermostat
-    config['temperature_history']=[sample(now,3,68),sample(now,2,68.8),sample(now,1,69.6)]
+    config['temperature_history']=[sample(now,3,69.2),sample(now,2,70),sample(now,1,70.8)]
     state.update(running=True,mode=4,fan_speed=40)
-    sensor['temperature_f']=70.4
+    sensor['temperature_f']=71.6
     result=scheduler.run_smart_control(now)
     assert result['reason']=='anticipating_target'
     assert result['midea_mode']=='fan'
@@ -374,7 +375,7 @@ def test_without_history_current_reading_still_controls_normally(thermostat):
     assert result['projected_room_f'] is None
 
 
-def test_residual_heat_allowance_replays_74_degree_overshoot(thermostat):
+def test_fixed_residual_allowance_no_longer_stops_heat_below_target(thermostat):
     now, config, sensor, state, unit = thermostat
     config['target_temperature_f'] = 74
     config['temperature_history'] = [
@@ -385,9 +386,10 @@ def test_residual_heat_allowance_replays_74_degree_overshoot(thermostat):
     state.update(running=True, mode=4, fan_speed=40)
     result = scheduler.run_smart_control(now)
     assert result['projected_room_f'] < 74
-    assert result['residual_heat_allowance_f'] == 1.5
-    assert result['reason'] == 'anticipating_target'
-    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
+    assert result['residual_heat_allowance_f'] == 0
+    assert result['action'] == 'hold' and result['reason'] == 'minimum_interval'
+    unit.command.assert_not_called()  # The existing heater keeps running.
+    assert state['running'] and state['mode'] == 4
     assert config['target_temperature_f'] == 74
 
 
@@ -434,7 +436,7 @@ def test_early_cutoff_finishes_mixing_before_reheating(thermostat):
                   circulation_since=(now-timedelta(minutes=6)).isoformat(),
                   last_command_at=(now-timedelta(minutes=6)).isoformat())
     state.update(running=True,mode=5,fan_speed=40)
-    sensor['temperature_f'] = 72.8
+    sensor['temperature_f'] = 73.8
     assert scheduler.run_smart_control(now)['reason'] == 'anticipating_target'
     unit.command.assert_not_called()
     sensor['fetched_at'] = (now+timedelta(minutes=1)).isoformat()
@@ -456,7 +458,7 @@ def test_comfort_exception_never_hides_real_sensor_loss(thermostat, problem):
 
 
 @pytest.mark.parametrize('fresh',[True,False])
-def test_weather_requires_recent_data_and_real_room_recovery(thermostat,fresh):
+def test_weather_cannot_delay_correction_two_degrees_outside_target(thermostat,fresh):
     now, config, sensor, state, unit=thermostat
     config['outside_checked_at']=(now-timedelta(minutes=0 if fresh else 31)).isoformat()
     config['temperature_history']=[{'at':(now-timedelta(minutes=m)).isoformat(),'room_f':v,'phase':'fan','calibration_f':0}
@@ -464,9 +466,50 @@ def test_weather_requires_recent_data_and_real_room_recovery(thermostat,fresh):
     sensor['temperature_f']=74.2
     state.update(running=True,mode=5,fan_speed=40)
     result=scheduler.run_smart_control(now)
-    if fresh:
-        assert result['reason']=='weather_assisted_settling'
-        unit.command.assert_not_called()
-    else:
-        assert result['action']=='adjusted' and result['midea_mode']=='cool'
+    assert result['action']=='adjusted' and result['midea_mode']=='cool'
+
+
+@pytest.mark.parametrize('mode,values', [(4,[62.4,62.8,63.0,63.5]), (2,[67.6,67.2,67.0,66.5])])
+def test_logged_65_degree_cycle_keeps_conditioning_instead_of_early_fan(thermostat,mode,values):
+    now, config, sensor, state, unit=thermostat
+    config.update(target_temperature_f=65,last_conditioning_mode={4:'heat',2:'cool'}[mode])
+    state.update(running=True,mode=mode,fan_speed=40)
+    for minute,value in enumerate(values):
+        tick=now+timedelta(minutes=minute)
+        sensor.update(temperature_f=value,fetched_at=tick.isoformat(),temperature_observed_at=tick.isoformat())
+        result=scheduler.run_smart_control(tick)
+        assert result['action'] not in {'off','circulate'}
+        assert result.get('reason') != 'anticipating_target'
+    for call in unit.command.call_args_list:
+        command=call.args[0]
+        assert command.get('action') != 'off' and command.get('mode') != 'fan'
+
+
+def test_old_early_cutoff_does_not_force_seven_minutes_of_fan_while_room_is_cold(thermostat):
+    now, config, sensor, state, unit=thermostat
+    config.update(target_temperature_f=65,last_conditioning_mode='heat',last_coast_reason='anticipating_target',
+                  circulation_since=(now-timedelta(minutes=6)).isoformat(),last_command_at=(now-timedelta(minutes=6)).isoformat())
+    state.update(running=True,mode=5,fan_speed=40)
+    sensor['temperature_f']=63.5
+    result=scheduler.run_smart_control(now)
+    assert result['midea_mode']=='heat' and result['action']=='adjusted'
+    assert unit.command.call_args.args[0]['running'] is True
+
+
+@pytest.mark.parametrize('mode,room', [(4,71.7),(2,72.3)])
+def test_without_measured_trend_active_conditioning_reaches_target(thermostat,mode,room):
+    now, config, sensor, state, unit=thermostat
+    state.update(running=True,mode=mode,fan_speed=40)
+    sensor['temperature_f']=room
+    result=scheduler.run_smart_control(now)
+    assert result['action'] not in {'circulate','off'}
+
+
+@pytest.mark.parametrize('mode', [2,4])
+def test_reaching_actual_target_still_stops_conditioning(thermostat,mode):
+    now, config, sensor, state, unit=thermostat
+    state.update(running=True,mode=mode,fan_speed=40)
+    sensor['temperature_f']=72
+    assert scheduler.run_smart_control(now)['reason']=='comfort_circulation'
+    unit.command.assert_called_once_with({'action':'set','mode':'fan','fan':'low','running':True})
 
