@@ -263,7 +263,7 @@ async function sendMode(mode){if(!currentStatus)return alert('Please wait for th
 async function changeTemperature(delta){if(!currentStatus)return alert('Please wait for the first status load.');let temp=Number(qs('#target-temp').textContent);if(!Number.isFinite(temp))return;temp=Math.max(60,Math.min(86,temp+delta));qs('#target-temp').textContent=String(temp);currentStatus.target_temperature_c=(temp-32)*5/9;optimisticStore();queueSettingCommand('Mode / temperature sent');}
 qs('#power-on').addEventListener('click',()=>sendPower('on'));
 qs('#power-off').addEventListener('click',()=>sendPower('off'));
-qs('#power-toggle').addEventListener('click',()=>sendPower(qs('#power-state').textContent==='On'?'off':'on'));
+qs('#power-toggle').addEventListener('click',()=>sendPower(currentStatus?.running?'off':'on'));
 qsa('.mode-tabs button').forEach(btn=>btn.addEventListener('click',()=>sendMode(btn.dataset.mode)));
 qs('#temp-down').disabled=false;qs('#temp-up').disabled=false;
 qs('#temp-down').addEventListener('click',()=>changeTemperature(-1));

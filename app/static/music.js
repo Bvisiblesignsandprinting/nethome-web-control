@@ -4,6 +4,7 @@
   const audio = $('music-audio');
   let tracks = [], nextOffset = null, currentId = null, playbackGeneration = 0;
   let loading = false, uploading = false;
+  const radioArtIds = ["y24-1", "y24-7", "y24-9", "y24b-37", "y24-8", "y24-10", "y24b-55", "y24b-54", "y24-11", "y24-2", "y24-6", "y24-3", "y24b-38", "y24b-39", "y24-5", "y24-16", "y24-17", "y24-4", "y24-12", "y24-13", "y24-14", "y24-19", "y24b-31", "y24b-28", "y24b-29", "y24b-40", "y24b-33", "y24b-35", "y24b-30", "y24b-27", "y24-26", "y24b-41", "y24-21", "y24b-47", "y24-25", "y24b-32", "y24b-42", "y24b-43", "y24b-48", "y24b-53", "y24b-49", "y24b-56", "y24b-50", "y24-1054", "y24b-44", "y24b-57", "y24-22", "y24b-34", "y24b-51", "y24-23", "y24-20", "y24-24", "y24b-45", "y24b-52", "y24b-46", "y24b-58", "y24-1058", "y24-1057", "y24-1056", "y24-1055"];
   let radioStations = [], currentRadio = null, radioLoading = false, radioVisible = false;
   let radioRetryTimer = null, radioRetries = 0;
   const cancelRadioRetry = () => { clearTimeout(radioRetryTimer); radioRetryTimer = null; };
@@ -124,7 +125,10 @@
     for (const row of visible) {
       const item = document.createElement('article'); item.className = 'music-track music-radio-row';
       if (row.id === currentRadio) item.classList.add('is-playing');
-      const art = document.createElement('div'); art.className = 'music-track-art'; art.textContent = 'Y24';
+      const art = document.createElement('div'); art.className = 'music-track-art';
+      const artworkIndex = radioArtIds.indexOf(row.id);
+      if (artworkIndex >= 0) { art.classList.add('radio-artwork'); art.style.backgroundPosition = `${(artworkIndex%10)/9*100}% ${Math.floor(artworkIndex/10)/5*100}%`; }
+      else art.textContent = 'Y24';
       const copy = document.createElement('div'); copy.className = 'music-track-copy';
       const name = document.createElement('strong'); name.textContent = row.name;
       const title = document.createElement('span'); title.textContent = row.title; title.className = 'music-radio-title';

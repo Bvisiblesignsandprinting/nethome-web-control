@@ -1,6 +1,6 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 class Element{
- constructor(id=''){this.id=id;this.listeners={};this.children=[];this.value='';this.files=[];this.hidden=false;this.disabled=false;this.textContent='';this.attrs={};this.classList={add:()=>{}};}
+ constructor(id=''){this.id=id;this.listeners={};this.children=[];this.value='';this.files=[];this.hidden=false;this.disabled=false;this.textContent='';this.attrs={};this.style={};this.classList={add:()=>{}};}
  addEventListener(k,fn){(this.listeners[k]??=[]).push(fn)}
  async emit(k){for(const fn of this.listeners[k]??[])await fn({preventDefault(){}});await flush()}
  append(...items){this.children.push(...items)}

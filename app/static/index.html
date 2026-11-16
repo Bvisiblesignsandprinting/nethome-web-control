@@ -5,59 +5,52 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>NetHome Control</title>
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/mode-backgrounds.css" />
   <link rel="stylesheet" href="/static/lighting.css" />
+  <link rel="stylesheet" href="/static/device.css?v=20261116" />
 </head>
-<body>
+<body data-background="sky">
   <div class="shell">
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-mark">NH</div>
-        <div><strong>NetHome Control</strong><span>Sukkah / Play Room</span></div>
+        <div><strong>NetHome</strong><span>Sukkah / Play Room</span></div>
       </div>
       <nav aria-label="Primary navigation">
-        <button class="nav active" data-view="dashboard"><span>⌂</span>Dashboard</button>
-        <button class="nav" data-view="schedules"><span>◷</span>Schedules</button>
-        <button class="nav" data-view="lighting"><span aria-hidden="true">☼</span>Lighting</button>
+        <button class="nav active" data-view="dashboard"><span>⌂</span>Home</button>
+        <button class="nav" data-view="schedules"><span>◷</span>Schedule</button>
+        <button class="nav" data-view="plugs"><span data-icon="bulb"></span>Lights</button>
+        <button class="nav" data-view="lighting"><span aria-hidden="true">☼</span>Color Lights</button>
         <button class="nav" data-view="music"><span aria-hidden="true">♫</span>Music</button>
         <button class="nav" data-view="activity"><span>≡</span>Activity</button>
         <button class="nav" data-view="settings"><span>⚙</span>Settings</button>
       </nav>
       <div class="sidebar-foot">
-        <div class="service-line"><span class="mini-dot"></span>Local service running</div>
+        <div class="service-line"><span class="mini-dot"></span>NetHome connected</div>
         <span id="write-lock">Writes locked</span>
       </div>
     </aside>
 
     <main>
       <header class="topbar">
-        <div>
-          <span class="location-label">Home climate control</span>
-          <strong>Sukkah / Play Room</strong>
-        </div>
-        <div class="top-status"><span class="mini-dot"></span>Secure local dashboard</div>
+        <div class="home-wordmark">NetHome <span id="home-clock"></span></div>
+        <div class="status-chips"><span>Indoor <strong id="header-room">—</strong></span><span>Humidity <strong id="header-humidity">—</strong></span><span>Outside <strong id="header-outside">—</strong></span></div>
+        <button class="appearance-shortcut" data-open="settings" aria-label="Open settings"><span data-icon="settings"></span></button>
       </header>
 
       <section id="dashboard" class="view active">
-        <div class="simple-ac">
+        <div class="home-board"><div class="simple-ac">
           <div class="simple-ac-top">
             <div>
-              <p class="eyebrow">HOME CLIMATE CONTROL</p>
-              <h1>Sukkah / Play Room AC</h1>
+              <p class="eyebrow">SUKKAH / PLAY ROOM</p>
+              <h1>Climate</h1>
               <div class="simple-weather"><span id="outdoor-temp">Outdoor --°F</span><span>/</span><span id="indoor-temp">Indoor --°F</span></div>
             </div>
             <div class="simple-online"><span id="status-dot" class="dot neutral"></span><span id="status-text">Not checked</span></div>
           </div>
 
-          <div class="mode-tabs" aria-label="AC mode">
-            <button type="button" data-mode="2">❄ Cool</button>
-            <button type="button" data-mode="3">◌ Dry</button>
-            <button type="button" data-mode="5">⌁ Fan</button>
-            <button type="button" data-mode="1">◉ Auto</button>
-            <button type="button" data-mode="4">☀ Heat</button>
-          </div>
+          
 
-          <div class="ac-hero">
+          <div class="climate-smart-status"><span data-icon="smart"></span><span id="home-smart-state">Checking Smart Auto…</span></div><div class="ac-hero">
             <button id="temp-down" class="round-control" disabled aria-label="Lower temperature">−</button>
             <div class="ac-dial">
               <div id="fan-label" class="fan-label">Fan --</div>
@@ -68,15 +61,35 @@
             <button id="temp-up" class="round-control" disabled aria-label="Raise temperature">+</button>
           </div>
 
-          <div class="simple-actions">
+          
+
+          
+
+          
+
+          
+        </div>
+        <div class="home-tiles">
+          <button class="home-tile" data-open="plugs"><span class="tile-icon amber" data-icon="bulb"></span><span class="tile-title">Lights</span><span class="tile-sub">Roof + wall</span><span id="home-lights-state" class="tile-status">Open controls</span><span class="tile-arrow">↗</span></button>
+          <button class="home-tile" data-open="lighting"><span class="tile-icon" data-icon="colors"></span><span class="tile-title">Color Lights</span><span class="tile-sub">Colors, fades &amp; effects</span><span class="tile-status">Not connected</span><span class="tile-arrow">↗</span></button>
+          <button class="home-tile" data-open="music"><span class="tile-icon cyan" data-icon="music"></span><span class="tile-title">Music</span><span class="tile-sub">Your library + Yiddish24</span><span class="tile-status">Browse music</span><span class="tile-arrow">↗</span></button>
+          <button class="home-tile" data-open="plugs"><span class="tile-icon violet" id="utility-icon" data-icon="waterfall"></span><span class="tile-title" data-utility-name>Waterfall</span><span class="tile-sub">Separate plug</span><span id="home-utility-state" class="tile-status">Open controls</span><span class="tile-arrow">↗</span></button>
+        </div></div>
+        <details class="climate-details glass" open><summary><span data-icon="climate"></span>Climate controls<span class="detail-hint">Modes, Smart Auto &amp; comfort</span></summary><div class="climate-details-body">
+<div class="mode-tabs" aria-label="AC mode">
+            <button type="button" data-mode="2">❄ Cool</button>
+            <button type="button" data-mode="3">◌ Dry</button>
+            <button type="button" data-mode="5">⌁ Fan</button>
+            <button type="button" data-mode="1">◉ Auto</button>
+            <button type="button" data-mode="4">☀ Heat</button>
+          </div>
+<div class="simple-actions">
             <button id="refresh-status" class="soft-action">↻ Refresh</button>
             <button id="power-on" class="soft-action" disabled>Power On</button>
             <button id="power-off" class="soft-action" disabled>Power Off</button>
           </div>
-
-          <div id="status-detail" class="simple-message">Checking the live AC status will enable available controls.</div>
-
-          <section class="smart-room-panel" aria-label="Smart Room controls">
+<div id="status-detail" class="simple-message">Checking the live AC status will enable available controls.</div>
+<section class="smart-room-panel" aria-label="Smart Room controls">
             <div class="smart-room-head">
               <div>
                 <p class="eyebrow">SMART ROOM</p>
@@ -103,16 +116,22 @@
             <div id="dashboard-smart-detail" class="smart-room-detail">Loading Smart Room status…</div>
             <button type="button" id="refresh-room-sensor" class="soft-action">↻ Refresh sensor</button>
           </section>
-
-          <div class="feature-row">
+<div class="feature-row">
             <button type="button" id="fan-speed-btn"><span>🌀</span><small>Fan Speed</small><em id="fan-speed-value">--</em></button>
             <button type="button" id="horizontal-btn"><span>↔</span><small>Left / Right</small></button>
             <button type="button" id="vertical-btn"><span>↕</span><small>Up / Down</small></button>
             <button type="button" id="eco-btn"><span>♻</span><small>Eco</small></button>
             <button type="button" id="boost-btn"><span>⚡</span><small>Boost</small></button>
             <button type="button" id="sleep-btn"><span>☾</span><small>Sleep</small></button>
-          </div>
-        </div>
+          </div>        </div></details>
+      </section>
+
+      <section id="plugs" class="view" aria-labelledby="plugs-title">
+        <div class="page-head"><div><p class="eyebrow">ROOM CONTROLS</p><h1 id="plugs-title">Lights &amp; <span data-utility-name>Waterfall</span></h1><p class="lede">Roof and wall lights work together. The third plug stays separate.</p></div><button id="plugs-refresh" class="secondary">Refresh</button></div>
+        <div class="plug-cards">
+          <article class="card plug-card"><span class="tile-icon amber" data-icon="bulb"></span><h2>Lights</h2><p>Roof + wall together</p><strong id="plug-lights-state">Checking connection…</strong><div class="plug-actions"><button data-plug="lights" data-power="true" disabled>Turn on</button><button data-plug="lights" data-power="false" class="secondary" disabled>Turn off</button></div></article>
+          <article class="card plug-card"><span class="tile-icon violet" data-icon="waterfall"></span><h2 data-utility-name>Waterfall</h2><p>Separate outlet</p><strong id="plug-utility-state">Checking connection…</strong><div class="plug-actions"><button data-plug="utility" data-power="true" disabled>Turn on</button><button data-plug="utility" data-power="false" class="secondary" disabled>Turn off</button></div></article>
+        </div><p id="plugs-message" role="status" aria-live="polite"></p><a class="setup-link" href="/plug-setup">Connect or assign your plugs <span>→</span></a>
       </section>
 
       <section id="schedules" class="view">
@@ -238,7 +257,7 @@
         <p id="lighting-state" role="status" aria-live="polite">Open Lighting to load your settings.</p>
         <div class="card lighting-link"><div><p class="eyebrow">RGB ZONE LINK</p><h2>Walls + Waterfall</h2><p id="lighting-link-detail">Control the two colored-light zones separately or make them follow each other.</p></div><button id="lighting-link-toggle" class="secondary" type="button" disabled>Link zones</button></div>
         <div id="lighting-zones" class="lighting-zones" aria-label="Lighting zones"></div>
-        <div class="card lighting-link"><div><p class="eyebrow">WATERFALL PUMP</p><h2>Waterfall</h2><p id="waterfall-draft-state">Setup pending · This button is separate from the waterfall lights.</p></div><button id="waterfall-draft-toggle" type="button" aria-pressed="false">Waterfall Off</button></div>
+        <div class="card lighting-link" hidden><div><p class="eyebrow">WATERFALL PUMP</p><h2>Waterfall</h2><p id="waterfall-draft-state">Setup pending · This button is separate from the waterfall lights.</p></div><button id="waterfall-draft-toggle" type="button" aria-pressed="false">Waterfall Off</button></div>
         <div class="lighting-section-head"><div><h2>Lighting schedules</h2><p class="lede">Saved timing will start controlling the lights after connection and activation.</p></div><button id="lighting-add" type="button" disabled>+ New lighting schedule</button></div>
         <form id="lighting-form" class="card lighting-form" hidden>
           <h2 id="lighting-form-title">New lighting schedule</h2>
@@ -301,12 +320,17 @@
       </section>
 
       <section id="activity" class="view">
-        <div class="page-head"><div><p class="eyebrow">AUDIT LOG</p><h1>Activity</h1><p class="lede">Every status check, schedule change, and future ChatGPT command appears here.</p></div><button id="refresh-activity" class="secondary">↻ Refresh</button></div>
+        <div class="page-head"><div><p class="eyebrow">AUDIT LOG</p><h1>Activity</h1><p class="lede">Recent control and schedule history.</p></div><button id="refresh-activity" class="secondary">↻ Refresh</button></div>
         <div id="activity-list" class="activity-list"></div>
       </section>
 
       <section id="settings" class="view">
-        <div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1>Settings</h1><p class="lede">Cloud control and direct text-message settings.</p></div></div>
+        <div class="page-head"><div><p class="eyebrow">SYSTEM</p><h1>Settings</h1><p class="lede">Your room, connections and appearance.</p></div></div>
+        <article class="card appearance-card"><div class="page-head"><div><p class="eyebrow">MAKE IT YOURS</p><h2>Appearance</h2><p class="lede">The same backgrounds as your NetHome screen.</p></div></div>
+          <div class="theme-grid" aria-label="Background design"><button class="theme-choice" data-theme="blue" aria-pressed="false"><span class="theme-preview blue"></span>Blue Wave</button><button class="theme-choice" data-theme="sky" aria-pressed="true"><span class="theme-preview sky"></span>Sky Wave</button><button class="theme-choice" data-theme="aurora" aria-pressed="false"><span class="theme-preview aurora"></span>Aurora Wave</button></div>
+          <h3 class="solid-heading">Solid colors</h3><div class="solid-grid" aria-label="Solid background"><button data-theme="ice" style="--swatch:#c7e4f3" aria-label="Ice blue" aria-pressed="false"></button><button data-theme="mint" style="--swatch:#c8e7da" aria-label="Mint" aria-pressed="false"></button><button data-theme="sand" style="--swatch:#e9ddc8" aria-label="Sand" aria-pressed="false"></button><button data-theme="rose" style="--swatch:#ebd2df" aria-label="Rose" aria-pressed="false"></button><button data-theme="slate" style="--swatch:#263d57" aria-label="Slate" aria-pressed="false"></button><button data-theme="midnight" style="--swatch:#0a152b" aria-label="Midnight" aria-pressed="false"></button></div><p class="helper">Saved in this browser. Your wall screen keeps its own appearance.</p>
+          <label class="utility-setting">Third plug appearance<select id="utility-design"><option value="waterfall">Waterfall</option><option value="balloon">Jumping Balloon</option></select></label><label class="utility-setting">Custom button name<input id="utility-label" maxlength="30" placeholder="Use the design’s default name"></label><p class="helper">Appearance only. The assigned outlet stays the same.</p>
+        </article>
         <div class="settings-grid">
           <article class="card setting-card" style="grid-column:1/-1">
             <div class="setting-icon">°</div>
@@ -409,7 +433,8 @@
       </section>
     </main>
   </div>
-  <script src="/static/app.js"></script>
+  <script src="/static/device-ui.js?v=20261116"></script>
+  <script src="/static/app.js?v=20261116"></script>
   <script src="/static/music.js?v=20261022c"></script>
   <script src="/static/lighting.js"></script>
 </body>

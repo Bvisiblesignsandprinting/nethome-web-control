@@ -63,7 +63,7 @@
         <label>Fade softness<input name="transition" type="range" min="0" max="100" value="${effect.transition}"><output>${effect.transition}%</output></label>
       </div><div class="lighting-effect-colors">${colors.map((color,i)=>`<label>Color ${i+1}<input name="effect_color_${i}" type="color" value="${color}"></label>`).join('')}</div>
       <div class="lighting-balance"><strong>Color balance</strong><p>Raise red if it looks darker during fades.</p><label>Red <input name="red_balance" type="range" min="50" max="200" value="${effect.red_balance}"><output>${effect.red_balance}%</output></label><label>Green <input name="green_balance" type="range" min="50" max="200" value="${effect.green_balance}"><output>${effect.green_balance}%</output></label><label>Blue <input name="blue_balance" type="range" min="50" max="200" value="${effect.blue_balance}"><output>${effect.blue_balance}%</output></label></div>
-      <p class="lighting-actual">These settings will be shared with the wall device after its Lighting screen is installed.</p></details>` : ''}
+      <p class="lighting-actual">These saved settings are shared with your NetHome screen.</p></details>` : ''}
       <p class="lighting-actual">Actual light state: unavailable until connected</p><button type="submit">Save settings</button>
     </form>`;
   }
